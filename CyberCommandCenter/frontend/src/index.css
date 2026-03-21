@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+code, .font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+body {
+  @apply bg-cyber-darker text-gray-100;
+  background-image: 
+    radial-gradient(circle at 25% 25%, rgba(0, 255, 136, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 75% 75%, rgba(0, 212, 255, 0.03) 0%, transparent 50%);
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0a0f;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f2937;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+
+/* Custom animations */
+@keyframes scan-line {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+.scan-line {
+  animation: scan-line 3s linear infinite;
+}
+
+/* Glowing effects */
+.glow-green {
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.3), 0 0 20px rgba(0, 255, 136, 0.2);
+}
+
+.glow-blue {
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.3), 0 0 20px rgba(0, 212, 255, 0.2);
+}
+
+.glow-red {
+  box-shadow: 0 0 10px rgba(255, 51, 102, 0.3), 0 0 20px rgba(255, 51, 102, 0.2);
+}
+
+/* Card styles */
+.cyber-card {
+  @apply bg-cyber-dark/50 backdrop-blur-sm border border-gray-800 rounded-xl;
+  background: linear-gradient(135deg, rgba(15, 15, 20, 0.8) 0%, rgba(10, 10, 15, 0.9) 100%);
+}
+
+.cyber-card-hover {
+  @apply cyber-card transition-all duration-300;
+}
+
+.cyber-card-hover:hover {
+  @apply border-cyber-accent/30;
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.1);
+}
+
+/* Button styles */
+.cyber-btn {
+  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+}
+
+.cyber-btn-primary {
+  @apply cyber-btn bg-cyber-accent text-cyber-dark hover:bg-cyber-accent/80;
+}
+
+.cyber-btn-secondary {
+  @apply cyber-btn bg-gray-800 text-gray-100 hover:bg-gray-700 border border-gray-700;
+}
+
+.cyber-btn-danger {
+  @apply cyber-btn bg-cyber-danger/20 text-cyber-danger border border-cyber-danger/30 hover:bg-cyber-danger/30;
+}
+
+/* Input styles */
+.cyber-input {
+  @apply w-full px-4 py-2 bg-cyber-dark border border-gray-700 rounded-lg focus:outline-none focus:border-cyber-accent transition-colors;
+}
+
+/* Status indicators */
+.status-online {
+  @apply w-2 h-2 rounded-full bg-cyber-accent animate-pulse;
+}
+
+.status-offline {
+  @apply w-2 h-2 rounded-full bg-gray-600;
+}
+
+/* Table styles */
+.cyber-table {
+  @apply w-full;
+}
+
+.cyber-table th {
+  @apply px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800;
+}
+
+.cyber-table td {
+  @apply px-4 py-3 border-b border-gray-800/50;
+}
+
+.cyber-table tr:hover td {
+  @apply bg-gray-800/30;
+}
+
+/* Terminal style */
+.terminal {
+  @apply font-mono text-sm bg-black/50 rounded-lg p-4 overflow-auto;
+  max-height: 400px;
+}
+
+.terminal-line {
+  @apply text-cyber-accent;
+}
+
+.terminal-line::before {
+  content: '> ';
+  @apply text-gray-500;
+}

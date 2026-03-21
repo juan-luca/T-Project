@@ -1,0 +1,382 @@
+================================================================================
+                    CYBER COMMAND CENTER - MEJORAS DE ROBUSTEZ
+                              Documento de Implementaciones
+================================================================================
+
+Fecha: 28 de Febrero 2026
+Estado: En Desarrollo
+
+================================================================================
+1. SISTEMA DE AUTENTICACIÓN Y SEGURIDAD
+================================================================================
+
+1.1 Autenticación básica con PIN/Password
+    - Endpoint /api/v1/auth/login para iniciar sesión
+    - Token JWT para mantener sesión
+    - Middleware de verificación en rutas sensibles
+    - Logout y expiración de sesiones (24h)
+
+1.2 Rate Limiting
+    - Límite de 100 requests/minuto por IP para endpoints normales
+    - Límite de 10 requests/minuto para endpoints sensibles (pranks, deauth)
+    - Protección contra ataques de fuerza bruta
+    - Bloqueo temporal después de múltiples intentos fallidos
+
+1.3 Validación de Inputs
+    - Sanitización de IPs, MACs, y hostnames
+    - Validación de rangos y formatos
+    - Prevención de inyección de comandos
+
+================================================================================
+2. SISTEMA DE LOGGING AVANZADO
+================================================================================
+
+2.1 Logger centralizado con múltiples destinos
+    - Archivo de logs rotativo (max 10MB, 5 archivos)
+    - Consola coloreada para debug
+    - Niveles: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+2.2 Tipos de eventos a capturar
+    - Accesos a la API (requests/responses)
+    - Escaneos de red ejecutados
+    - Pranks ejecutados/detenidos
+    - Errores y excepciones
+    - Cambios en dispositivos
+
+2.3 Formato estructurado
+    - Timestamp ISO 8601
+    - Nivel de severidad
+    - Módulo origen
+    - Mensaje descriptivo
+    - Datos adicionales (JSON)
+
+================================================================================
+3. HEALTH CHECK Y MONITOREO
+================================================================================
+
+3.1 Endpoint de health check (/api/v1/health)
+    - Estado del servidor
+    - Estado de la base de datos
+    - Uso de memoria y CPU
+    - Tiempo de actividad (uptime)
+    - Versión de la aplicación
+
+3.2 Métricas del sistema
+    - Contadores de requests por endpoint
+    - Tiempo de respuesta promedio
+    - Errores por tipo
+    - Dispositivos activos
+
+================================================================================
+4. MANEJO DE ERRORES ROBUSTO
+================================================================================
+
+4.1 Error handlers globales
+    - Captura de excepciones no manejadas
+    - Respuestas de error consistentes (JSON)
+    - Códigos HTTP apropiados
+    - Mensajes amigables sin exponer detalles internos
+
+4.2 Estructura de respuesta de error
+    {
+        "success": false,
+        "error": {
+            "code": "ERROR_CODE",
+            "message": "Descripción amigable",
+            "details": {} // Solo en modo debug
+        }
+    }
+
+================================================================================
+5. SISTEMA DE CONFIGURACIÓN MEJORADO
+================================================================================
+
+5.1 Configuración por ambiente
+    - Desarrollo (debug=true, logs verbose)
+    - Producción (debug=false, logs minimal)
+    - Validación de configuraciones al inicio
+
+5.2 Variables de entorno soportadas
+    - SECRET_KEY (obligatorio en producción)
+    - DEBUG_MODE
+    - LOG_LEVEL
+    - AUTH_PIN
+    - DB_PATH
+
+================================================================================
+6. BASE DE DATOS MEJORADA
+================================================================================
+
+6.1 Connection pooling
+    - Pool de conexiones configurable
+    - Manejo de conexiones perdidas
+    - Retry automático
+
+6.2 Nuevas tablas
+    - audit_log: Registro de todas las acciones
+    - api_keys: Para autenticación de API
+    - settings: Configuraciones persistentes
+    - sessions: Sesiones de usuario activas
+
+================================================================================
+7. FRONTEND MEJORADO
+================================================================================
+
+7.1 Error Boundaries
+    - Captura de errores de React
+    - UI de fallback amigable
+    - Reporte de errores
+
+7.2 Estados de carga mejorados
+    - Skeletons durante carga
+    - Mensajes informativos
+    - Retry automático en fallos
+
+7.3 Persistencia local
+    - Cache de configuraciones en localStorage
+    - Estado offline básico
+    - Sincronización al reconectar
+
+================================================================================
+8. NOTIFICACIONES Y ALERTAS
+================================================================================
+
+8.1 Sistema de notificaciones en tiempo real
+    - WebSocket para eventos importantes
+    - Notificaciones del navegador (con permiso)
+    - Cola de notificaciones pendientes
+
+8.2 Tipos de alertas
+    - Nuevo dispositivo detectado
+    - Dispositivo desconectado
+    - Prank completado/fallido
+    - Errores críticos
+
+================================================================================
+IMPLEMENTACIONES A REALIZAR (PRIORIDAD):
+================================================================================
+
+[ALTA]  1. Sistema de logging avanzado         ✅ COMPLETADO
+        -> core/logger.py - Logger con colores, JSON, rotación de archivos
+        -> Niveles: DEBUG, INFO, WARNING, ERROR, CRITICAL
+        -> Logs: app.log, error.log, audit.log, access.log
+
+[ALTA]  2. Health check endpoint               ✅ COMPLETADO
+        -> GET /api/v1/health - Estado completo del sistema
+        -> GET /api/v1/health/simple - Health check rápido
+        -> Métricas: CPU, memoria, disco, uptime, DB status
+
+[ALTA]  3. Validación de inputs                ✅ COMPLETADO
+        -> core/validators.py - Validadores para IP, MAC, ports, strings
+        -> Protección contra command injection
+        -> Decorador @validate_request para rutas
+
+[ALTA]  4. Error handlers globales             ✅ COMPLETADO
+        -> core/error_handlers.py - Manejo centralizado de errores
+        -> Respuestas JSON consistentes
+        -> Decorador @handle_errors para rutas
+
+[MEDIA] 5. Rate limiting básico                ✅ COMPLETADO
+        -> Decorador @rate_limit(requests_per_minute=N)
+        -> Aplicado a endpoints sensibles (pranks, blocks)
+
+[MEDIA] 6. Configuración por ambiente          ⏳ PENDIENTE
+        -> Separar config desarrollo/producción
+
+[MEDIA] 7. Error boundaries en frontend        ✅ COMPLETADO
+        -> components/ErrorBoundary.jsx
+        -> Captura errores de React con UI amigable
+        -> SectionErrorBoundary para módulos individuales
+
+[BAJA]  8. Autenticación con PIN               ⏳ PENDIENTE
+        -> Sistema de login básico
+
+[BAJA]  9. Métricas del sistema                ✅ PARCIAL
+        -> Integrado en health check
+
+================================================================================
+NUEVAS IMPLEMENTACIONES (SESIÓN 2):
+================================================================================
+
+[ALTA]  10. Sistema de Alertas en Tiempo Real   ✅ COMPLETADO
+         -> core/alerts.py - AlertManager singleton
+         -> AlertType: new_device, device_offline, security_threat, etc.
+         -> AlertSeverity: low, medium, high, critical
+         -> Subscripción por WebSocket
+         -> Configuración de horas quietas
+         -> API: /api/v1/alerts/realtime, /api/v1/alerts/settings
+
+[ALTA]  11. Programador de Pranks              ✅ COMPLETADO
+         -> core/scheduler.py - PrankScheduler singleton
+         -> Tipos: one-time, daily, weekly, interval
+         -> Persistencia en JSON
+         -> Thread de verificación automática
+         -> API: /api/v1/scheduler/pranks, pause, resume
+
+[ALTA]  12. Control Parental                   ✅ COMPLETADO
+         -> core/parental_control.py - ParentalControl
+         -> Límites de tiempo diarios
+         -> Modo noche (bedtime)
+         -> Filtrado por categorías (social, gaming, video, adult)
+         -> Tracking de uso por dispositivo
+         -> API: /api/v1/parental/devices, /check-access
+
+[ALTA]  13. Bot de Telegram                    ✅ COMPLETADO
+         -> core/telegram_bot.py - TelegramBot singleton
+         -> Comandos: /status, /devices, /scan, /block, /unblock
+         -> /prank, /alerts, /health, /help
+         -> Notificaciones automáticas de alertas
+         -> Control remoto completo
+
+[ALTA]  14. WiFi Hacker (Auditoría Ética)      ✅ COMPLETADO
+         -> core/wifi_hacker.py - WiFiHacker singleton
+         -> Ataques WPS: Pixie Dust, PIN brute force
+         -> Captura de Handshake WPA/WPA2
+         -> Captura de PMKID (sin handshake)
+         -> Cracking con diccionario (aircrack-ng, hashcat)
+         -> Gestión de modo monitor
+         -> API: /api/v1/wifi-hacker/*
+
+[ALTA]  15. Monitor de Tráfico                 ✅ COMPLETADO
+         -> core/traffic_monitor.py - TrafficMonitor singleton
+         -> Tasas en tiempo real (bps, Mbps)
+         -> Historial: por segundo, minuto, hora
+         -> Tráfico por dispositivo
+         -> Estadísticas por interfaz
+         -> Detección de picos (spike alerts)
+         -> API: /api/v1/traffic/*
+
+[MEDIA] 16. Sistema de Temas                   ✅ COMPLETADO
+         -> core/theme_manager.py - ThemeManager singleton
+         -> Temas: dark, light, hacker, cyberpunk, ocean, sunset
+         -> Soporte para tema personalizado
+         -> Preferencias de usuario persistentes
+         -> Generación de CSS variables
+         -> API: /api/v1/themes, /api/v1/preferences
+
+[MEDIA] 17. Perfiles de Dispositivos           ✅ COMPLETADO
+         -> core/device_profiles.py - DeviceProfileManager singleton
+         -> Configuración por dispositivo (MAC)
+         -> Niveles de acceso: full, limited, restricted, blocked
+         -> Horarios de red personalizados
+         -> Límites de ancho de banda
+         -> Categorías bloqueadas
+         -> Templates: child, teen, guest, work, iot
+         -> API: /api/v1/profiles/*
+
+[MEDIA] 18. Export/Import de Config            ✅ COMPLETADO
+         -> core/config_manager.py - ConfigManager singleton
+         -> Exportar a JSON/ZIP
+         -> Importar y restaurar
+         -> Sistema de backups automáticos
+         -> Componentes selectivos
+         -> API: /api/v1/config/export, import, backup, restore
+
+================================================================================
+ARCHIVOS CREADOS/MODIFICADOS:
+================================================================================
+
+NUEVOS (BACKEND):
+- backend/core/logger.py          - Sistema de logging avanzado
+- backend/core/validators.py      - Validación de inputs
+- backend/core/error_handlers.py  - Manejo de errores y health check
+- backend/core/alerts.py          - Sistema de alertas en tiempo real
+- backend/core/scheduler.py       - Programador de pranks
+- backend/core/parental_control.py - Control parental
+- backend/core/telegram_bot.py    - Bot de Telegram
+- backend/core/wifi_hacker.py     - WiFi hacking ético
+- backend/core/traffic_monitor.py - Monitor de tráfico de red
+- backend/core/theme_manager.py   - Sistema de temas
+- backend/core/device_profiles.py - Perfiles de dispositivos
+- backend/core/config_manager.py  - Export/Import de configuración
+- backend/logs/                   - Directorio para logs
+
+NUEVOS (FRONTEND):
+- frontend/src/components/ErrorBoundary.jsx - Error boundary React
+- frontend/src/pages/TrafficMonitor.jsx     - Dashboard de tráfico
+- frontend/src/pages/WiFiHackerPage.jsx     - UI de WiFi hacking
+
+MODIFICADOS:
+- backend/app.py                  - Integración de todos los módulos + APIs
+- frontend/src/App.jsx            - Nuevas rutas
+- frontend/src/components/Sidebar.jsx - Nuevas opciones de navegación
+
+================================================================================
+APIS AGREGADAS:
+================================================================================
+
+ALERTAS:
+  GET  /api/v1/alerts/realtime
+  GET  /api/v1/alerts/settings
+  PUT  /api/v1/alerts/settings
+  POST /api/v1/alerts/{id}/dismiss
+  POST /api/v1/alerts/dismiss-all
+
+SCHEDULER:
+  GET  /api/v1/scheduler/pranks
+  POST /api/v1/scheduler/pranks
+  DELETE /api/v1/scheduler/pranks/{id}
+  POST /api/v1/scheduler/pause
+  POST /api/v1/scheduler/resume
+
+TRAFFIC:
+  GET  /api/v1/traffic/current
+  GET  /api/v1/traffic/stats
+  GET  /api/v1/traffic/history?period=minute
+  GET  /api/v1/traffic/devices
+  GET  /api/v1/traffic/interfaces
+  PUT  /api/v1/traffic/spike-threshold
+
+THEMES:
+  GET  /api/v1/preferences
+  PUT  /api/v1/preferences
+  GET  /api/v1/themes
+  PUT  /api/v1/themes/current
+  POST /api/v1/themes/custom
+  GET  /api/v1/themes/css
+
+PROFILES:
+  GET  /api/v1/profiles
+  GET  /api/v1/profiles/{mac}
+  POST /api/v1/profiles
+  PUT  /api/v1/profiles/{mac}
+  DELETE /api/v1/profiles/{mac}
+  GET  /api/v1/profiles/{mac}/check-access
+  GET  /api/v1/profiles/templates
+
+PARENTAL:
+  GET  /api/v1/parental/devices
+  GET  /api/v1/parental/devices/{mac}
+  PUT  /api/v1/parental/devices/{mac}
+  GET  /api/v1/parental/devices/{mac}/usage
+  GET  /api/v1/parental/devices/{mac}/check-access
+  GET  /api/v1/parental/bedtime
+
+CONFIG:
+  GET  /api/v1/config/export
+  GET  /api/v1/config/export/download
+  POST /api/v1/config/import
+  GET  /api/v1/config/components
+  POST /api/v1/config/backup
+  GET  /api/v1/config/backups
+  POST /api/v1/config/backups/{name}/restore
+  DELETE /api/v1/config/backups/{name}
+
+WIFI HACKER:
+  GET  /api/v1/wifi-hacker/status
+  GET  /api/v1/wifi-hacker/interfaces
+  PUT  /api/v1/wifi-hacker/interface
+  POST /api/v1/wifi-hacker/monitor-mode
+  GET  /api/v1/wifi-hacker/scan-wps
+  POST /api/v1/wifi-hacker/attack/wps-pixie
+  POST /api/v1/wifi-hacker/attack/wps-bruteforce
+  POST /api/v1/wifi-hacker/capture/handshake
+  POST /api/v1/wifi-hacker/capture/pmkid
+  POST /api/v1/wifi-hacker/crack
+  POST /api/v1/wifi-hacker/stop
+  GET  /api/v1/wifi-hacker/wordlists
+  POST /api/v1/wifi-hacker/download-wordlist
+
+================================================================================
+                              FIN DEL DOCUMENTO
+================================================================================
