@@ -178,6 +178,7 @@ class WiFiNetwork(Base):
             'first_seen': self.first_seen.isoformat() if self.first_seen else None,
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
             'handshake_captured': self.handshake_captured,
+            'handshake_path': self.handshake_path,
             'is_cracked': self.is_cracked,
             'password': self.password if self.is_cracked else None,
             'notes': self.notes
