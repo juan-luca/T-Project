@@ -16,6 +16,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 import platform
 
+# Shared input-validation helpers (prevents command injection via subprocess)
+from core.wifi_audit import validate_bssid, validate_mac, validate_interface, validate_channel
+
 
 class AttackType(Enum):
     WPS_PIN = "wps_pin"
@@ -432,9 +435,15 @@ class WiFiHacker:
         Pixie Dust WPS attack (fast)
         Uses reaver with pixiewps
         """
+        try:
+            bssid = validate_bssid(bssid)
+            channel = validate_channel(channel)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+
         if not self.tools_available.get('reaver'):
             return {'success': False, 'error': 'reaver not available'}
-        
+
         if not self.monitor_interface:
             result = self.enable_monitor_mode()
             if not result['success']:
@@ -521,6 +530,12 @@ class WiFiHacker:
         WPS PIN brute force attack
         This is slow but works on most WPS-enabled routers
         """
+        try:
+            bssid = validate_bssid(bssid)
+            channel = validate_channel(channel)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+
         if not self.tools_available.get('reaver'):
             return {'success': False, 'error': 'reaver not available'}
         
@@ -619,6 +634,14 @@ class WiFiHacker:
         re-authenticate, which generates the 4-way handshake.
         Emits SocketIO events so the frontend can follow progress live.
         """
+        try:
+            bssid = validate_bssid(bssid)
+            channel = validate_channel(channel)
+            if client_mac:
+                client_mac = validate_mac(client_mac, allow_broadcast=True)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+
         if not self.tools_available.get('airodump-ng'):
             return {'success': False, 'error': 'airodump-ng not available'}
 
@@ -759,11 +782,16 @@ class WiFiHacker:
     def crack_handshake(self, capture_file: str, wordlist: str = None,
                         bssid: str = None, use_gpu: bool = False) -> Dict:
         """
-        Crack captured handshake using dictionary attack
-        """
-        if not self.tools_available.get('aircrack-ng'):
-            return {'success': False, 'error': 'aircrack-ng not available'}
+        Crack a captured WPA/WPA2 handshake using a dictionary attack.
 
+        When use_gpu=True and hashcat is available the capture is first
+        converted to .hc22000 format and hashcat is used (GPU-accelerated).
+        Progress is emitted via SocketIO every ~10 s so the frontend can
+        show live feedback.
+
+        Falls back to aircrack-ng (CPU) when hashcat is unavailable or
+        use_gpu=False.
+        """
         if not Path(capture_file).exists():
             return {'success': False, 'error': 'Capture file not found'}
 
@@ -771,51 +799,173 @@ class WiFiHacker:
             return {'success': False, 'error': 'Wordlist not specified'}
 
         if not Path(wordlist).exists():
-            # Check in wordlists directory
             wordlist_path = self.wordlists_dir / wordlist
             if not wordlist_path.exists():
                 return {'success': False, 'error': 'Wordlist not found'}
             wordlist = str(wordlist_path)
-        
+
+        if bssid:
+            try:
+                bssid = validate_bssid(bssid)
+            except ValueError as e:
+                return {'success': False, 'error': str(e)}
+
+        # Route to hashcat when GPU is requested and tool is present
+        if use_gpu and self.tools_available.get('hashcat') and self.tools_available.get('hcxpcapngtool'):
+            return self._crack_with_hashcat(capture_file, wordlist, bssid)
+
+        # ── aircrack-ng (CPU) path ────────────────────────────────────────
+        if not self.tools_available.get('aircrack-ng'):
+            return {'success': False, 'error': 'aircrack-ng not available'}
+
         self.current_attack = AttackType.DICTIONARY_ATTACK
         self._stop_flag = False
         start_time = time.time()
-        
+
         try:
             cmd = ['aircrack-ng', '-w', wordlist, capture_file]
             if bssid:
                 cmd.extend(['-b', bssid])
-            
+
             process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
             )
-            
             self.attack_process = process
             password = None
             keys_tested = 0
-            
+
             for line in process.stdout:
                 if self._stop_flag:
                     process.terminate()
                     break
-                
-                # Look for "KEY FOUND"
+
                 key_match = re.search(r'KEY FOUND!\s*\[\s*(.+?)\s*\]', line)
                 if key_match:
                     password = key_match.group(1)
                     break
-                
-                # Parse keys tested
+
                 tested_match = re.search(r'(\d+) keys tested', line)
                 if tested_match:
                     keys_tested = int(tested_match.group(1))
-            
+                    self._emit('wifi_crack_progress', {
+                        'tool': 'aircrack-ng',
+                        'keys_tested': keys_tested,
+                        'elapsed': round(time.time() - start_time, 1)
+                    })
+
             process.wait()
             duration = time.time() - start_time
-            
+
+            result = AttackResult(
+                attack_type=AttackType.DICTIONARY_ATTACK,
+                target_bssid=bssid or "unknown",
+                target_essid="",
+                success=password is not None,
+                password=password,
+                duration_seconds=duration,
+                timestamp=datetime.now(),
+                details={'wordlist': wordlist, 'keys_tested': keys_tested, 'tool': 'aircrack-ng'}
+            )
+            if not password:
+                result.error = f"Password not found after {keys_tested} attempts"
+
+            self.attack_results.append(result)
+            self._save_result(result)
+            return result.to_dict()
+
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+        finally:
+            self.current_attack = None
+            self.attack_process = None
+
+    def _crack_with_hashcat(self, capture_file: str, wordlist: str,
+                            bssid: str = None) -> Dict:
+        """
+        Internal GPU-accelerated cracking via hashcat (mode 22000 = WPA-PBKDF2-PMK).
+        Converts .cap → .hc22000 first, then streams hashcat output for real-time
+        progress events, and reads results with --show at the end.
+        """
+        self.current_attack = AttackType.DICTIONARY_ATTACK
+        self._stop_flag = False
+        start_time = time.time()
+
+        cap_path = Path(capture_file)
+        hash_file = cap_path.with_suffix('.hc22000')
+
+        try:
+            # Step 1: convert capture to hashcat format
+            self._emit('wifi_crack_progress', {'tool': 'hashcat', 'status': 'converting'})
+            conv = subprocess.run(
+                ['hcxpcapngtool', '-o', str(hash_file), str(cap_path)],
+                capture_output=True, text=True, timeout=60
+            )
+            if not hash_file.exists() or hash_file.stat().st_size == 0:
+                return {
+                    'success': False,
+                    'error': f'Conversion to hashcat format failed: {conv.stderr[:200]}'
+                }
+
+            # Step 2: run hashcat with status updates every 10 s
+            cmd = [
+                'hashcat',
+                '-m', '22000',   # WPA-PBKDF2-PMK
+                '-a', '0',       # Dictionary attack
+                '--status',
+                '--status-timer', '10',
+                '--potfile-disable',  # don't write to global potfile
+                str(hash_file),
+                wordlist,
+            ]
+            if bssid:
+                cmd.extend(['--username'])  # some builds need this for 22000
+
+            self._emit('wifi_crack_progress', {'tool': 'hashcat', 'status': 'running'})
+
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            self.attack_process = process
+            password = None
+            speed_kh = 0
+
+            for line in process.stdout:
+                if self._stop_flag:
+                    process.terminate()
+                    break
+
+                # "Cracked" line in potfile-disable mode
+                if 'Cracked' in line or 'All hashes found' in line:
+                    pass  # will read with --show
+
+                # Speed: "Speed.#1.........:   123.4 kH/s"
+                speed_m = re.search(r'Speed.*?:\s*([\d.]+)\s*(k|M|G)?H/s', line, re.I)
+                if speed_m:
+                    val = float(speed_m.group(1))
+                    unit = (speed_m.group(2) or '').lower()
+                    speed_kh = int(val * {'k': 1, 'm': 1000, 'g': 1_000_000}.get(unit, 1))
+                    self._emit('wifi_crack_progress', {
+                        'tool': 'hashcat',
+                        'status': 'running',
+                        'speed_kh': speed_kh,
+                        'elapsed': round(time.time() - start_time, 1)
+                    })
+
+            process.wait()
+
+            # Step 3: retrieve cracked password with --show
+            show = subprocess.run(
+                ['hashcat', '-m', '22000', str(hash_file), '--show'],
+                capture_output=True, text=True, timeout=30
+            )
+            for line in show.stdout.splitlines():
+                # Format: <hash>:<ssid>:<password>  or  <hash>:<password>
+                parts = line.strip().split(':')
+                if len(parts) >= 2:
+                    password = parts[-1]
+                    break
+
+            duration = time.time() - start_time
             result = AttackResult(
                 attack_type=AttackType.DICTIONARY_ATTACK,
                 target_bssid=bssid or "unknown",
@@ -826,18 +976,18 @@ class WiFiHacker:
                 timestamp=datetime.now(),
                 details={
                     'wordlist': wordlist,
-                    'keys_tested': keys_tested
+                    'tool': 'hashcat',
+                    'speed_kh': speed_kh,
+                    'hash_file': str(hash_file)
                 }
             )
-            
             if not password:
-                result.error = f"Password not found after {keys_tested} attempts"
-            
+                result.error = "Password not found in wordlist (hashcat)"
+
             self.attack_results.append(result)
             self._save_result(result)
-            
             return result.to_dict()
-            
+
         except Exception as e:
             return {'success': False, 'error': str(e)}
         finally:
@@ -850,6 +1000,12 @@ class WiFiHacker:
         Capture PMKID for faster cracking (no handshake needed)
         Requires hcxdumptool and hcxpcapngtool
         """
+        try:
+            bssid = validate_bssid(bssid)
+            channel = validate_channel(channel)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+
         if not self.tools_available.get('hcxdumptool'):
             return {'success': False, 'error': 'hcxdumptool not available'}
         
@@ -943,18 +1099,77 @@ class WiFiHacker:
     def stop_attack(self) -> Dict:
         """Stop current attack"""
         self._stop_flag = True
-        
+
         if self.attack_process:
             try:
                 self.attack_process.terminate()
                 self.attack_process.wait(timeout=5)
-            except:
+            except subprocess.TimeoutExpired:
                 self.attack_process.kill()
-        
+            except Exception as e:
+                print(f"Error stopping attack process: {e}")
+
         self.current_attack = None
         self.attack_process = None
-        
+
         return {'success': True, 'message': 'Attack stopped'}
+
+    def cleanup_old_captures(self, days: int = 7) -> Dict:
+        """
+        Delete capture files (.cap, .pcapng, .hc22000, .hash) older than
+        `days` days.  Preserves the results/ directory (cracked passwords).
+        Returns a summary of what was removed.
+        """
+        import time as _time
+        cutoff = _time.time() - (days * 86400)
+        removed = []
+        freed_bytes = 0
+
+        globs = ['**/*.cap', '**/*.pcapng', '**/*.hc22000',
+                 '**/*.hash', '**/filter_*.txt']
+        search_dirs = [self.captures_dir]  # handshakes/ is a sub-dir
+
+        for search_dir in search_dirs:
+            for pattern in globs:
+                for f in search_dir.glob(pattern):
+                    # Never delete files inside results/ (cracked passwords)
+                    if 'results' in f.parts:
+                        continue
+                    try:
+                        if f.stat().st_mtime < cutoff:
+                            freed_bytes += f.stat().st_size
+                            f.unlink()
+                            removed.append(str(f))
+                    except Exception:
+                        pass
+
+        return {
+            'success': True,
+            'files_removed': len(removed),
+            'freed_mb': round(freed_bytes / (1024 * 1024), 2),
+            'paths': removed
+        }
+
+    def list_captures(self) -> List[Dict]:
+        """Return metadata for all capture files on disk."""
+        captures = []
+        for pattern in ['**/*.cap', '**/*.pcapng', '**/*.hc22000']:
+            for f in self.captures_dir.glob(pattern):
+                if 'results' in f.parts:
+                    continue
+                try:
+                    stat = f.stat()
+                    captures.append({
+                        'path': str(f),
+                        'name': f.name,
+                        'size_mb': round(stat.st_size / (1024 * 1024), 3),
+                        'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        'type': f.suffix.lstrip('.')
+                    })
+                except Exception:
+                    pass
+        captures.sort(key=lambda x: x['modified'], reverse=True)
+        return captures
     
     def get_status(self) -> Dict:
         """Get current attack status"""

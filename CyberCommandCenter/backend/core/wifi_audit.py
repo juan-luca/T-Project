@@ -30,6 +30,54 @@ CAPTURES_DIR = BASE_DIR / "captures"
 HANDSHAKES_DIR = CAPTURES_DIR / "handshakes"
 WORDLISTS_DIR = BASE_DIR / "wordlists"
 
+# ---------------------------------------------------------------------------
+# Input validation helpers — used by all WiFi modules to prevent command
+# injection when values are passed to subprocess calls.
+# ---------------------------------------------------------------------------
+
+_MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$')
+_IFACE_RE = re.compile(r'^[a-zA-Z0-9_\-\.]{1,32}$')
+_CHANNEL_RE = re.compile(r'^(1[0-4]|[1-9])$')  # channels 1-14
+
+
+def validate_mac(mac: str, allow_broadcast: bool = True) -> str:
+    """
+    Validate and normalise a MAC address.  Raises ValueError on bad input so
+    the caller never forwards untrusted strings to subprocess.
+
+    Returns the MAC in uppercase colon-separated form.
+    """
+    if allow_broadcast and mac.lower() in ('ff:ff:ff:ff:ff:ff', 'ffffffffffff'):
+        return 'FF:FF:FF:FF:FF:FF'
+    # Normalise dashes to colons
+    normalized = mac.replace('-', ':')
+    if not _MAC_RE.match(normalized):
+        raise ValueError(f"Invalid MAC address: {mac!r}")
+    return normalized.upper()
+
+
+def validate_bssid(bssid: str) -> str:
+    """Validate a BSSID (no broadcast allowed)."""
+    return validate_mac(bssid, allow_broadcast=False)
+
+
+def validate_interface(iface: str) -> str:
+    """Validate a network interface name."""
+    if not _IFACE_RE.match(iface):
+        raise ValueError(f"Invalid interface name: {iface!r}")
+    return iface
+
+
+def validate_channel(channel) -> int:
+    """Validate a WiFi channel (1-14)."""
+    try:
+        ch = int(channel)
+    except (TypeError, ValueError):
+        raise ValueError(f"Channel must be an integer, got: {channel!r}")
+    if not 1 <= ch <= 14:
+        raise ValueError(f"Channel {ch} out of range (1-14)")
+    return ch
+
 
 class HandshakeCapture:
     """
@@ -168,6 +216,10 @@ class HandshakeCapture:
         if not SCAPY_AVAILABLE:
             raise Exception("Scapy not available")
 
+        # Validate inputs before they reach any subprocess call
+        target_bssid = validate_bssid(target_bssid)
+        channel = validate_channel(channel)
+
         if self.is_capturing:
             return False
 
@@ -301,6 +353,10 @@ class HandshakeCapture:
             return False
 
         try:
+            # Validate before forwarding to any subprocess/Scapy call
+            target_bssid = validate_bssid(target_bssid)
+            client_mac = validate_mac(client_mac, allow_broadcast=True)
+
             # Use injected deauth function if available (set by app.py / wifi_audit_routes)
             if self._deauth_func is not None:
                 return bool(self._deauth_func(target_bssid, client_mac, count))

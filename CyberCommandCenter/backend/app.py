@@ -1469,6 +1469,34 @@ def health_simple():
     return jsonify({'status': 'ok', 'timestamp': datetime.utcnow().isoformat() + 'Z'})
 
 # ============================================
+# API Routes - Capture File Management
+# ============================================
+
+@app.route('/api/v1/wifi-hacker/captures')
+@handle_errors
+def list_captures():
+    """List all capture files on disk with metadata."""
+    return jsonify(wifi_hacker.list_captures())
+
+@app.route('/api/v1/wifi-hacker/captures/cleanup', methods=['POST'])
+@handle_errors
+@rate_limit(requests_per_minute=5)
+def cleanup_captures():
+    """Delete capture files older than N days (default 7)."""
+    data = request.get_json() or {}
+    days = data.get('days', 7)
+    try:
+        days = int(days)
+        if not 1 <= days <= 365:
+            raise ValueError
+    except (ValueError, TypeError):
+        return error_response(error=Errors.validation_error("days must be an integer between 1 and 365"))
+
+    audit("captures_cleanup", {'days': days})
+    result = wifi_hacker.cleanup_old_captures(days)
+    return jsonify(result)
+
+# ============================================
 # Request Logging Middleware
 # ============================================
 

