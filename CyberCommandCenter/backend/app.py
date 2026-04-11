@@ -43,12 +43,19 @@ from core.device_profiles import profile_manager
 from core.config_manager import config_manager
 from core.parental_control import parental_control
 from core.wifi_hacker import wifi_hacker
+from api.wifi_audit_routes import wifi_audit_bp
 
 # Initialize Flask app
 app = Flask(__name__, static_folder='../frontend/dist', static_url_path='')
 app.config['SECRET_KEY'] = SECRET_KEY
 CORS(app, origins=CORS_ORIGINS)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# Register blueprints
+app.register_blueprint(wifi_audit_bp)
+
+# Provide SocketIO to wifi_hacker for real-time capture events
+wifi_hacker.set_socketio(socketio)
 
 # Initialize core components
 scanner = NetworkScanner()
@@ -1208,12 +1215,13 @@ def delete_backup(name):
 @handle_errors
 def wifi_hacker_status():
     """Get WiFi hacker status and capabilities"""
+    current = wifi_hacker.current_attack
     return jsonify({
         'available': wifi_hacker.is_available(),
         'tools': wifi_hacker.check_requirements(),
         'interface': wifi_hacker.interface,
         'monitor_mode': wifi_hacker.monitor_mode_enabled,
-        'current_attack': wifi_hacker.current_attack
+        'current_attack': current.value if current else None
     })
 
 @app.route('/api/v1/wifi-hacker/interfaces')

