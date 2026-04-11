@@ -43,12 +43,19 @@ from core.device_profiles import profile_manager
 from core.config_manager import config_manager
 from core.parental_control import parental_control
 from core.wifi_hacker import wifi_hacker
+from api.wifi_audit_routes import wifi_audit_bp
 
 # Initialize Flask app
 app = Flask(__name__, static_folder='../frontend/dist', static_url_path='')
 app.config['SECRET_KEY'] = SECRET_KEY
 CORS(app, origins=CORS_ORIGINS)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# Register blueprints
+app.register_blueprint(wifi_audit_bp)
+
+# Provide SocketIO to wifi_hacker for real-time capture events
+wifi_hacker.set_socketio(socketio)
 
 # Initialize core components
 scanner = NetworkScanner()
@@ -1208,12 +1215,13 @@ def delete_backup(name):
 @handle_errors
 def wifi_hacker_status():
     """Get WiFi hacker status and capabilities"""
+    current = wifi_hacker.current_attack
     return jsonify({
         'available': wifi_hacker.is_available(),
         'tools': wifi_hacker.check_requirements(),
         'interface': wifi_hacker.interface,
         'monitor_mode': wifi_hacker.monitor_mode_enabled,
-        'current_attack': wifi_hacker.current_attack
+        'current_attack': current.value if current else None
     })
 
 @app.route('/api/v1/wifi-hacker/interfaces')
@@ -1459,6 +1467,34 @@ def health_check():
 def health_simple():
     """Simple health check for monitoring"""
     return jsonify({'status': 'ok', 'timestamp': datetime.utcnow().isoformat() + 'Z'})
+
+# ============================================
+# API Routes - Capture File Management
+# ============================================
+
+@app.route('/api/v1/wifi-hacker/captures')
+@handle_errors
+def list_captures():
+    """List all capture files on disk with metadata."""
+    return jsonify(wifi_hacker.list_captures())
+
+@app.route('/api/v1/wifi-hacker/captures/cleanup', methods=['POST'])
+@handle_errors
+@rate_limit(requests_per_minute=5)
+def cleanup_captures():
+    """Delete capture files older than N days (default 7)."""
+    data = request.get_json() or {}
+    days = data.get('days', 7)
+    try:
+        days = int(days)
+        if not 1 <= days <= 365:
+            raise ValueError
+    except (ValueError, TypeError):
+        return error_response(error=Errors.validation_error("days must be an integer between 1 and 365"))
+
+    audit("captures_cleanup", {'days': days})
+    result = wifi_hacker.cleanup_old_captures(days)
+    return jsonify(result)
 
 # ============================================
 # Request Logging Middleware

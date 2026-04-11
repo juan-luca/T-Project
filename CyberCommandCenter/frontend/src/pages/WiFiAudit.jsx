@@ -283,17 +283,16 @@ function WiFiAudit() {
         </div>
       )}
 
-      {/* Capture Status */}
+      {/* Capture Status — real-time 4-way handshake progress */}
       {captureStatus?.is_capturing && (
         <div className="cyber-card p-4 border-cyber-accent/30 bg-cyber-accent/5">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
               <Radio className="w-5 h-5 text-cyber-accent animate-pulse" />
               <div>
-                <p className="font-medium">Capturando handshake...</p>
-                <p className="text-sm text-gray-400">
-                  Target: {captureStatus.current?.target_bssid} | 
-                  EAPOL: {captureStatus.current?.eapol_count || 0}/4
+                <p className="font-medium">Capturando handshake WPA...</p>
+                <p className="text-sm text-gray-400 font-mono">
+                  {captureStatus.current?.target_bssid} | Canal {captureStatus.current?.channel}
                 </p>
               </div>
             </div>
@@ -304,6 +303,50 @@ function WiFiAudit() {
               <Square className="w-4 h-4" />
               Detener
             </button>
+          </div>
+
+          {/* 4-way handshake message tracker */}
+          <div className="mt-2">
+            <p className="text-xs text-gray-500 mb-2">
+              Progreso del 4-way handshake (necesitas M1+M2 o M2+M3 para crackear):
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              {['M1', 'M2', 'M3', 'M4'].map((msg) => {
+                const captured = (captureStatus.current?.eapol_messages || []).includes(msg)
+                const isMinimum = msg === 'M1' || msg === 'M2' || msg === 'M3'
+                return (
+                  <div
+                    key={msg}
+                    className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm font-mono border
+                      ${captured
+                        ? 'bg-cyber-accent/20 border-cyber-accent text-cyber-accent'
+                        : 'bg-gray-800/50 border-gray-600 text-gray-500'
+                      }`}
+                  >
+                    <span className={captured ? 'text-cyber-accent' : 'text-gray-600'}>
+                      {captured ? '✓' : '○'}
+                    </span>
+                    {msg}
+                    {isMinimum && (
+                      <span className="text-xs opacity-60 ml-1">
+                        {msg === 'M1' ? 'ANonce' : msg === 'M2' ? 'SNonce+MIC' : 'GTK+MIC'}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {captureStatus.current?.handshake_complete && (
+              <p className="text-cyber-accent text-sm mt-2 font-semibold">
+                ✓ Handshake válido capturado — listo para crackear offline
+              </p>
+            )}
+
+            <p className="text-xs text-gray-600 mt-2">
+              Paquetes EAPOL totales: {captureStatus.current?.eapol_count || 0} |
+              Paquetes capturados: {captureStatus.current?.packets_captured || 0}
+            </p>
           </div>
         </div>
       )}

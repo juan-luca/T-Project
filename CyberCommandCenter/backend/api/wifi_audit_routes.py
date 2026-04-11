@@ -139,11 +139,25 @@ def stop_capture():
 
 @wifi_audit_bp.route('/capture/status')
 def capture_status():
-    """Get current capture status"""
-    return jsonify({
-        'is_capturing': handshake_capture.is_capturing,
-        'current': handshake_capture.current_capture if handshake_capture.is_capturing else None
-    })
+    """Get current capture status - returns only JSON-serializable fields."""
+    if not handshake_capture.is_capturing:
+        return jsonify({'is_capturing': False, 'current': None})
+
+    cap = handshake_capture.current_capture
+    # Build a safe, serializable snapshot (Scapy Packet objects are NOT serializable)
+    serializable = {
+        'target_bssid': cap.get('target_bssid'),
+        'channel': cap.get('channel'),
+        'eapol_count': cap.get('eapol_count', 0),
+        # Keys of eapol_messages dict = ['M1', 'M2', ...] - always strings
+        'eapol_messages': sorted(cap.get('eapol_messages', {}).keys()),
+        'handshake_complete': cap.get('handshake_complete', False),
+        'handshake_messages': cap.get('handshake_messages', []),
+        'packets_captured': len(cap.get('packets', [])),
+        'output_file': cap.get('output_file'),
+        'start_time': cap.get('start_time').isoformat() if cap.get('start_time') else None,
+    }
+    return jsonify({'is_capturing': True, 'current': serializable})
 
 @wifi_audit_bp.route('/capture/deauth', methods=['POST'])
 def send_deauth_for_capture():
