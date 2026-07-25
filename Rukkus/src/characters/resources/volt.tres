@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="CharacterData" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://src/data/CharacterData.gd" id="1"]
+[ext_resource type="Resource" path="res://src/data/tuning_default.tres" id="2"]
+[ext_resource type="Resource" path="res://src/weapons/resources/rifle.tres" id="3"]
+
+[resource]
+script = ExtResource("1")
+id = &"volt"
+display_name = "Volt Vega"
+backstory = "An ex-lab experiment who walked out wearing the reactor. Moves like lightning, thinks even faster."
+personality = "Cool, precise, deadpan one-liners."
+max_hp = 85.0
+max_shield = 0.0
+move_tuning = ExtResource("2")
+starting_weapon = ExtResource("3")
+ability_id = &"blink_dash"
+ability_cooldown = 2.2
+ultimate_id = &"chain_storm"
+ultimate_cost = 100.0
+color = Color(0.35, 0.7, 1.0, 1)
+barks = PackedStringArray("Shocking.", "Too slow.", "Ground yourself.")
+unlock_cost = 750

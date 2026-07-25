@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="ProjectileData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/data/ProjectileData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+speed = 620.0
+lifetime = 2.0
+motion = 0
+explode_on_hit = true
+explosion_radius = 130.0
+explosion_damage = 90.0
+color = Color(1, 0.4, 0.2, 1)
+size = Vector2(20, 8)
+trail = true
+impact_sfx = &"explosion"

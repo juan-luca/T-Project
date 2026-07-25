@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/data/WeaponData.gd" id="1"]
+[ext_resource type="Resource" path="res://src/weapons/resources/proj_pellet.tres" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"shotgun"
+display_name = "Boomstick"
+description = "Close-range devastation. Big knockback, big fun."
+damage = 9.0
+damage_type = 0
+fire_mode = 0
+fire_rate = 1.6
+pellets = 8
+spread_degrees = 12.0
+projectile = ExtResource("2")
+recoil = 220.0
+knockback = 320.0
+screen_shake = 0.35
+mag_size = 6
+reserve_ammo = 48
+reload_time = 1.4
+fire_sfx = &"shoot_shotgun"

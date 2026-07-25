@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/data/WeaponData.gd" id="1"]
+[ext_resource type="Resource" path="res://src/weapons/resources/proj_bullet.tres" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"minigun"
+display_name = "Meat Grinder"
+description = "Screaming lead hose. Suppress everything."
+damage = 7.0
+damage_type = 0
+fire_mode = 1
+fire_rate = 22.0
+pellets = 1
+spread_degrees = 7.0
+projectile = ExtResource("2")
+recoil = 30.0
+knockback = 40.0
+screen_shake = 0.18
+mag_size = 120
+reserve_ammo = 480
+reload_time = 2.6
+fire_sfx = &"shoot_minigun"
