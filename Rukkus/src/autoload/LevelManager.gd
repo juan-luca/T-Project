@@ -2,8 +2,6 @@ extends Node
 ## Loads/unloads level scenes asynchronously and spawns the player(s) at the level's
 ## spawn point. Keeps the main scene free of level-specific wiring.
 
-const PLAYER_SCENE := preload("res://scenes/Player.tscn")
-
 var current_level: Node = null
 var current_level_id: StringName = &""
 var _world_root: Node = null
@@ -35,19 +33,10 @@ func _swap_level(packed: PackedScene, level_id: StringName) -> void:
 	current_level_id = level_id
 	var parent := _world_root if _world_root else get_tree().current_scene
 	parent.add_child(current_level)
-	_spawn_players()
-	EventBus.level_loaded.emit(level_id)
-
-func _spawn_players() -> void:
+	# Record the spawn point, then let CoopManager spawn all joined players (co-op aware).
 	var spawn := _find_spawn()
-	for slot in GameManager.get_active_players():
-		var player := PLAYER_SCENE.instantiate()
-		player.set("slot", slot)
-		current_level.add_child(player)
-		if player is Node2D and spawn:
-			player.global_position = spawn.global_position
-		CheckpointManager.set_spawn(spawn.global_position if spawn else Vector2.ZERO)
-		EventBus.player_spawned.emit(player, slot)
+	CheckpointManager.set_spawn(spawn.global_position if spawn else Vector2.ZERO)
+	EventBus.level_loaded.emit(level_id)
 
 func _find_spawn() -> Node2D:
 	var nodes := get_tree().get_nodes_in_group("player_spawn")

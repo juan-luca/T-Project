@@ -244,7 +244,10 @@ func _on_respawned(s: int) -> void:
 	if s != slot:
 		return
 	health.reset()
-	global_position = CheckpointManager.get_spawn()
+	# Co-op: respawn beside a living teammate when possible, else the checkpoint.
+	global_position = CoopManager.get_respawn_position(slot)
 	velocity = Vector2.ZERO
+	hurtbox.set_deferred("monitorable", true)
+	health.grant_invuln(1.5)          # brief spawn protection
 	state_machine.transition_to(&"idle")
 	EventBus.player_health_changed.emit(slot, health.hp, health.max_hp)

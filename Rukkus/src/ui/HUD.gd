@@ -1,15 +1,10 @@
 extends CanvasLayer
-## Heads-up display. Pure view: it only listens to EventBus and renders. It never reads or
-## mutates gameplay state, so it can be redesigned freely without touching systems.
-## Shows health, shield, ammo, grenades, special meter, score, objective, notifications,
-## floating damage numbers and (debug) FPS.
+## Heads-up display. Pure view: it only listens to EventBus and renders. Supports up to 4
+## players — a compact panel per slot is created on player_spawned and routed by slot.
+## Global elements (score, objective, notifications, floating damage, FPS) are shared.
 
-var _hp_bar: ColorRect
-var _hp_bg: ColorRect
-var _shield_bar: ColorRect
-var _special_bar: ColorRect
-var _ammo_label: Label
-var _nade_label: Label
+var _root: Control
+var _widgets: Dictionary = {}          ## slot -> Dictionary of controls
 var _score_label: Label
 var _objective_label: Label
 var _notify_label: Label
@@ -18,7 +13,8 @@ var _notify_t: float = 0.0
 
 func _ready() -> void:
 	layer = 10
-	_build()
+	_build_global()
+	EventBus.player_spawned.connect(_on_player_spawned)
 	EventBus.player_health_changed.connect(_on_health)
 	EventBus.player_shield_changed.connect(_on_shield)
 	EventBus.player_special_changed.connect(_on_special)
@@ -28,75 +24,98 @@ func _ready() -> void:
 	EventBus.notify.connect(_on_notify)
 	EventBus.floating_number_requested.connect(_on_floating_number)
 
-func _build() -> void:
-	var root := Control.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(root)
+func _build_global() -> void:
+	_root = Control.new()
+	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_root)
 
-	_hp_bg = _panel(root, Vector2(24, 24), Vector2(300, 26), Color(0, 0, 0, 0.5))
-	_hp_bar = _panel(root, Vector2(26, 26), Vector2(296, 22), Color(0.9, 0.25, 0.25))
-	_shield_bar = _panel(root, Vector2(26, 52), Vector2(220, 10), Color(0.35, 0.7, 1.0))
-	_special_bar = _panel(root, Vector2(26, 66), Vector2(220, 8), Color(1.0, 0.85, 0.3))
-
-	_ammo_label = _label(root, Vector2(24, 84), 22, Color.WHITE)
-	_ammo_label.text = "AMMO --/--"
-	_nade_label = _label(root, Vector2(24, 112), 20, Color(0.6, 1.0, 0.6))
-	_nade_label.text = "GRENADES 3"
-
-	_score_label = _label(root, Vector2(0, 24), 24, Color.WHITE)
+	_score_label = _label(_root, Vector2(-220, 24), 24, Color.WHITE)
 	_score_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	_score_label.position = Vector2(-220, 24)
 	_score_label.size.x = 200
 	_score_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 
-	_objective_label = _label(root, Vector2(0, 24), 18, Color(0.9, 0.9, 0.7))
+	_objective_label = _label(_root, Vector2(-300, 20), 18, Color(0.9, 0.9, 0.7))
 	_objective_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_objective_label.position = Vector2(-200, 20)
-	_objective_label.size.x = 400
+	_objective_label.position = Vector2(-300, 20)
+	_objective_label.size.x = 600
 	_objective_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
-	_notify_label = _label(root, Vector2(0, 120), 34, Color(1, 0.95, 0.6))
+	_notify_label = _label(_root, Vector2(-300, 130), 34, Color(1, 0.95, 0.6))
 	_notify_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_notify_label.position = Vector2(-300, 120)
+	_notify_label.position = Vector2(-300, 130)
 	_notify_label.size.x = 600
 	_notify_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_notify_label.modulate.a = 0.0
 
-	_fps_label = _label(root, Vector2(-90, 60), 16, Color(0.6, 1, 0.6))
+	_fps_label = _label(_root, Vector2(-90, 60), 16, Color(0.6, 1, 0.6))
 	_fps_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	_fps_label.position = Vector2(-90, 60)
 
 func _process(delta: float) -> void:
 	_score_label.text = "SCORE %06d" % GameManager.score
+	_fps_label.visible = Settings.show_fps
 	if Settings.show_fps:
-		_fps_label.visible = true
 		_fps_label.text = "%d FPS" % Engine.get_frames_per_second()
-	else:
-		_fps_label.visible = false
 	if _notify_t > 0.0:
 		_notify_t -= delta
 		_notify_label.modulate.a = clampf(_notify_t, 0.0, 1.0)
 
-# --- EventBus reactions -----------------------------------------------------
-func _on_health(_slot: int, hp: float, max_hp: float) -> void:
+# --- Per-player widgets -----------------------------------------------------
+func _on_player_spawned(player: Node, slot: int) -> void:
+	if _widgets.has(slot):
+		return
+	var accent := Color(0.9, 0.7, 0.3)
+	if player is Player and player.character:
+		accent = player.character.color
+	var y := 24.0 + slot * 92.0
+	var w := {}
+	w["bg"] = _panel(_root, Vector2(24, y), Vector2(300, 24), Color(0, 0, 0, 0.5))
+	w["hp"] = _panel(_root, Vector2(26, y + 2), Vector2(296, 20), Color(0.9, 0.25, 0.25))
+	w["shield"] = _panel(_root, Vector2(26, y + 26), Vector2(220, 8), Color(0.35, 0.7, 1.0))
+	w["special"] = _panel(_root, Vector2(26, y + 38), Vector2(220, 6), Color(1.0, 0.85, 0.3))
+	w["tag"] = _label(_root, Vector2(30, y - 1), 16, accent)
+	w["tag"].text = "P%d" % (slot + 1)
+	w["ammo"] = _label(_root, Vector2(120, y + 48), 16, Color.WHITE)
+	w["ammo"].text = "--/--"
+	w["nade"] = _label(_root, Vector2(230, y + 48), 16, Color(0.6, 1.0, 0.6))
+	w["nade"].text = "G:3"
+	_widgets[slot] = w
+
+func _w(slot: int) -> Dictionary:
+	return _widgets.get(slot, {})
+
+func _on_health(slot: int, hp: float, max_hp: float) -> void:
+	var w := _w(slot)
+	if w.is_empty():
+		return
 	var frac := clampf(hp / maxf(1.0, max_hp), 0.0, 1.0)
-	_hp_bar.size.x = 296 * frac
-	_hp_bar.color = Color(0.9, 0.25, 0.25).lerp(Color(0.3, 0.9, 0.35), frac)
+	w["hp"].size.x = 296 * frac
+	w["hp"].color = Color(0.9, 0.25, 0.25).lerp(Color(0.3, 0.9, 0.35), frac)
 
-func _on_shield(_slot: int, shield: float, max_shield: float) -> void:
-	_shield_bar.visible = max_shield > 0.0
+func _on_shield(slot: int, shield: float, max_shield: float) -> void:
+	var w := _w(slot)
+	if w.is_empty():
+		return
+	w["shield"].visible = max_shield > 0.0
 	if max_shield > 0.0:
-		_shield_bar.size.x = 220 * clampf(shield / max_shield, 0.0, 1.0)
+		w["shield"].size.x = 220 * clampf(shield / max_shield, 0.0, 1.0)
 
-func _on_special(_slot: int, value: float, max_value: float) -> void:
-	_special_bar.size.x = 220 * clampf(value / maxf(1.0, max_value), 0.0, 1.0)
+func _on_special(slot: int, value: float, max_value: float) -> void:
+	var w := _w(slot)
+	if not w.is_empty():
+		w["special"].size.x = 220 * clampf(value / maxf(1.0, max_value), 0.0, 1.0)
 
-func _on_ammo(_slot: int, in_mag: int, reserve: int) -> void:
-	_ammo_label.text = "AMMO %d / %d" % [in_mag, reserve]
+func _on_ammo(slot: int, in_mag: int, reserve: int) -> void:
+	var w := _w(slot)
+	if not w.is_empty():
+		w["ammo"].text = "%d/%d" % [in_mag, reserve]
 
-func _on_grenades(_slot: int, count: int) -> void:
-	_nade_label.text = "GRENADES %d" % count
+func _on_grenades(slot: int, count: int) -> void:
+	var w := _w(slot)
+	if not w.is_empty():
+		w["nade"].text = "G:%d" % count
 
 func _on_notify(text: String) -> void:
 	_notify_label.text = text
@@ -111,7 +130,7 @@ func _on_floating_number(pos: Vector2, amount: float, kind: int) -> void:
 	world.add_child(fn)
 	fn.global_position = pos + Vector2(randf_range(-8, 8), -20)
 
-# --- Small UI helpers -------------------------------------------------------
+# --- helpers ---------------------------------------------------------------
 func _panel(parent: Control, pos: Vector2, sz: Vector2, col: Color) -> ColorRect:
 	var r := ColorRect.new()
 	r.position = pos
@@ -126,7 +145,7 @@ func _label(parent: Control, pos: Vector2, font_size: int, col: Color) -> Label:
 	l.position = pos
 	l.add_theme_font_size_override("font_size", font_size)
 	l.add_theme_color_override("font_color", col)
-	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	l.add_theme_constant_override("outline_size", 4)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(l)

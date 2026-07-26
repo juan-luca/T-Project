@@ -50,6 +50,12 @@ func _follow(delta: float) -> void:
 	if lead is CharacterBody2D:
 		center.x += clampf(lead.velocity.x / 320.0, -1.0, 1.0) * look_ahead
 	global_position = global_position.lerp(center, clampf(follow_smoothing * delta, 0.0, 1.0))
+	# Co-op framing: zoom out as players spread apart (only when no scripted zoom is active).
+	if players.size() > 1 and _zoom_timer <= 0.0:
+		var spread := 0.0
+		for p in players:
+			spread = maxf(spread, center.distance_to((p as Node2D).global_position))
+		_zoom_target = clampf(base_zoom - spread / 1600.0, 0.55, base_zoom)
 
 func _shake(_delta: float) -> void:
 	var shake := _trauma * _trauma          # quadratic feels better than linear
