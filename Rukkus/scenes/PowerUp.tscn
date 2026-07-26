@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/powerups/PowerUp.gd" id="1_pu"]
+
+[sub_resource type="CircleShape2D" id="circ_pu"]
+radius = 14.0
+
+[node name="PowerUp" type="Area2D"]
+collision_layer = 32
+collision_mask = 2
+script = ExtResource("1_pu")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("circ_pu")

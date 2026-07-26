@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="PowerUpData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/data/PowerUpData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"damage_x2"
+display_name = "Double Damage"
+effect = 2
+magnitude = 2.0
+duration = 12.0
+color = Color(1.0, 0.4, 0.2, 1)
+pickup_sfx = &"pickup"

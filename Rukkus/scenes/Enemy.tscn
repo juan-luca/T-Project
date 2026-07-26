@@ -1,0 +1,66 @@
+[gd_scene load_steps=13 format=3]
+
+[ext_resource type="Script" path="res://src/enemies/Enemy.gd" id="1_enemy"]
+[ext_resource type="Script" path="res://src/enemies/EnemyVisuals.gd" id="2_vis"]
+[ext_resource type="Script" path="res://src/core/state_machine/StateMachine.gd" id="3_sm"]
+[ext_resource type="Script" path="res://src/combat/HealthComponent.gd" id="4_hp"]
+[ext_resource type="Script" path="res://src/combat/HurtboxComponent.gd" id="5_hurt"]
+[ext_resource type="Script" path="res://src/enemies/PerceptionComponent.gd" id="6_perc"]
+[ext_resource type="Script" path="res://src/player/components/WeaponHolder.gd" id="7_wh"]
+[ext_resource type="Script" path="res://src/combat/HitboxComponent.gd" id="8_hit"]
+[ext_resource type="Resource" path="res://src/enemies/resources/grunt.tres" id="9_data"]
+
+[sub_resource type="CapsuleShape2D" id="cap_body"]
+radius = 14.0
+height = 46.0
+
+[sub_resource type="RectangleShape2D" id="rect_hurt"]
+size = Vector2(30, 46)
+
+[sub_resource type="RectangleShape2D" id="rect_contact"]
+size = Vector2(34, 46)
+
+[node name="Enemy" type="CharacterBody2D"]
+collision_layer = 4
+collision_mask = 1
+script = ExtResource("1_enemy")
+data = ExtResource("9_data")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("cap_body")
+
+[node name="Visuals" type="Node2D" parent="."]
+script = ExtResource("2_vis")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("4_hp")
+
+[node name="HurtboxComponent" type="Area2D" parent="."]
+collision_layer = 128
+collision_mask = 0
+script = ExtResource("5_hurt")
+team = 1
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="HurtboxComponent"]
+shape = SubResource("rect_hurt")
+
+[node name="PerceptionComponent" type="Node2D" parent="."]
+script = ExtResource("6_perc")
+
+[node name="WeaponHolder" type="Node2D" parent="."]
+script = ExtResource("7_wh")
+team = 1
+slot = -1
+
+[node name="ContactHitbox" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 128
+script = ExtResource("8_hit")
+damage = 10.0
+knockback = 220.0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ContactHitbox"]
+shape = SubResource("rect_contact")
+
+[node name="StateMachine" type="Node" parent="."]
+script = ExtResource("3_sm")

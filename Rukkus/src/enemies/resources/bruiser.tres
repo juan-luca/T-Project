@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="EnemyData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/data/EnemyData.gd" id="1"]
+[ext_resource type="Resource" path="res://src/weapons/resources/shotgun.tres" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"bruiser"
+display_name = "Heavy Bruiser"
+archetype = 1
+max_hp = 160.0
+move_speed = 80.0
+contact_damage = 22.0
+score_value = 300
+resistances = PackedFloat32Array(0.7, 1, 1, 1, 1, 1)
+vision_range = 340.0
+vision_angle_deg = 80.0
+hearing_range = 220.0
+reaction_time = 0.5
+aggression = 0.8
+can_take_cover = false
+can_flank = false
+can_retreat = false
+retreat_hp_ratio = 0.0
+can_throw_grenades = true
+weapon = ExtResource("2")
+color = Color(0.55, 0.3, 0.5, 1)
+death_sfx = &"enemy_die_heavy"

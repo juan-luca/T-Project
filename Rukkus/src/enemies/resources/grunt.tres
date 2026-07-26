@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="EnemyData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/data/EnemyData.gd" id="1"]
+[ext_resource type="Resource" path="res://src/weapons/resources/pistol.tres" id="2"]
+
+[resource]
+script = ExtResource("1")
+id = &"grunt"
+display_name = "Militia Grunt"
+archetype = 0
+max_hp = 40.0
+move_speed = 130.0
+contact_damage = 10.0
+score_value = 100
+vision_range = 400.0
+vision_angle_deg = 100.0
+hearing_range = 280.0
+reaction_time = 0.35
+aggression = 1.0
+can_take_cover = true
+can_flank = false
+can_retreat = true
+retreat_hp_ratio = 0.25
+weapon = ExtResource("2")
+color = Color(0.75, 0.25, 0.25, 1)
+death_sfx = &"enemy_die"

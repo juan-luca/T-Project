@@ -26,7 +26,7 @@ class_name Player
 @onready var floor_ray: RayCast2D = $FloorRay
 
 var tuning: MovementTuning
-var intent: InputManager.Intent
+var intent: PlayerIntent
 var facing: int = 1                       ## 1 = right, -1 = left
 var aim_dir: Vector2 = Vector2.RIGHT
 
@@ -124,10 +124,13 @@ func _tick_timers(delta: float) -> void:
 
 func _update_aim() -> void:
 	aim_dir = intent.aim
-	if aim_dir.x != 0:
-		facing = signi(int(aim_dir.x))
+	# Diagonal aim vectors have fractional x (e.g. 0.707) — compare, don't int()-truncate.
+	if aim_dir.x > 0.01:
+		facing = 1
+	elif aim_dir.x < -0.01:
+		facing = -1
 	elif absf(intent.move.x) > 0.1:
-		facing = signi(int(sign(intent.move.x)))
+		facing = 1 if intent.move.x > 0 else -1
 	aim_pivot.rotation = aim_dir.angle()
 
 func _post_move(delta: float) -> void:
@@ -172,7 +175,9 @@ func wall_dir() -> int:
 	return 0
 
 func at_ledge() -> bool:
-	return tuning.can_ledge_grab and ledge_ray.is_colliding() == false and wall_dir() != 0 and not is_on_floor()
+	# Ledge on the right: a low wall ray hits but the high ledge ray is clear.
+	return tuning.can_ledge_grab and not is_on_floor() \
+		and wall_ray_r.is_colliding() and not ledge_ray.is_colliding()
 
 # --- Combat (central) ------------------------------------------------------
 func _handle_combat() -> void:

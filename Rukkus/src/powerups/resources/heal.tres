@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="PowerUpData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/data/PowerUpData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"heal"
+display_name = "Med Kit"
+effect = 0
+magnitude = 50.0
+duration = 0.0
+color = Color(0.3, 1.0, 0.4, 1)
+pickup_sfx = &"pickup"

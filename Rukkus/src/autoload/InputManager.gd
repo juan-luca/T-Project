@@ -5,20 +5,6 @@ extends Node
 ## so adding players 2-4 (local co-op) is a device-binding change, not a rewrite.
 ## This is the single most important seam for the multiplayer-readiness requirement.
 
-## An immutable snapshot of a player's inputs for one frame.
-class Intent:
-	var move := Vector2.ZERO       ## analog move (x) / aim vertical (y)
-	var aim := Vector2.RIGHT       ## 8-direction aim vector
-	var jump_pressed := false
-	var jump_held := false
-	var jump_released := false
-	var fire_held := false
-	var fire_pressed := false
-	var dash_pressed := false
-	var grenade_pressed := false
-	var melee_pressed := false
-	var special_pressed := false
-
 const ACTIONS := {
 	"left": "_left", "right": "_right", "up": "_up", "down": "_down",
 	"jump": "_jump", "fire": "_fire", "dash": "_dash",
@@ -38,9 +24,9 @@ func _snap_8(v: Vector2, fallback: Vector2) -> Vector2:
 	var ang := snappedf(v.angle(), PI / 4.0)
 	return Vector2.RIGHT.rotated(ang)
 
-func get_intent(slot: int) -> Intent:
+func get_intent(slot: int) -> PlayerIntent:
 	var p: String = _slot_prefix.get(slot, "p1")
-	var it := Intent.new()
+	var it := PlayerIntent.new()
 	var x := Input.get_axis(p + "_left", p + "_right")
 	var y := Input.get_axis(p + "_up", p + "_down")
 	it.move = Vector2(x, y)
