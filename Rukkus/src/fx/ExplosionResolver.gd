@@ -22,20 +22,20 @@ func _on_explosion(pos: Vector2, radius: float, damage: float) -> void:
 	q.collide_with_areas = true
 	q.collide_with_bodies = false
 	for hit in space.intersect_shape(q, 64):
-		var area = hit.get("collider")
-		if area is HurtboxComponent:
-			var d := area.global_position.distance_to(pos)
+		var area := hit.get("collider") as HurtboxComponent
+		if area:
+			var d: float = area.global_position.distance_to(pos)
 			var falloff := clampf(1.0 - d / radius, 0.1, 1.0)
-			var dir := (area.global_position - pos).normalized()
+			var dir: Vector2 = (area.global_position - pos).normalized()
 			area.receive(DamageInfo.make(damage * falloff, DamageInfo.Type.EXPLOSIVE, dir * 520.0 * falloff, self))
 	# 2) Launch loose rigid debris for spectacle.
 	q.collision_mask = 0xFFFFFFFF
 	q.collide_with_areas = false
 	q.collide_with_bodies = true
 	for hit in space.intersect_shape(q, 64):
-		var body = hit.get("collider")
-		if body is RigidBody2D:
-			var dir := (body.global_position - pos).normalized()
+		var body := hit.get("collider") as RigidBody2D
+		if body:
+			var dir: Vector2 = (body.global_position - pos).normalized()
 			var falloff := clampf(1.0 - body.global_position.distance_to(pos) / radius, 0.1, 1.0)
 			body.apply_central_impulse(dir * 600.0 * falloff)
 

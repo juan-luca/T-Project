@@ -8,7 +8,7 @@ extends Node
 ## imperative names for requests (request_slow_motion).
 
 # --- Game flow -------------------------------------------------------------
-signal game_state_changed(new_state: int)          ## GameManager.State
+signal game_state_changed(new_state: int)          ## GameManager.GameState
 signal level_load_requested(level_id: StringName)
 signal level_loaded(level_id: StringName)
 signal level_completed(level_id: StringName)

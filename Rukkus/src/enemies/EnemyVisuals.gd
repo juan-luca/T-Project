@@ -9,8 +9,12 @@ var _flash: float = 0.0
 
 func _ready() -> void:
 	_enemy = get_parent() as Enemy
+	# NOTE: this child's _ready runs before Enemy._ready, so Enemy.health (@onready) isn't
+	# assigned yet. Grab the HealthComponent node directly — it already exists in the tree.
 	if _enemy:
-		_enemy.health.damaged.connect(func(_i): _flash = 1.0)
+		var hc := _enemy.get_node_or_null("HealthComponent") as HealthComponent
+		if hc:
+			hc.damaged.connect(func(_i): _flash = 1.0)
 
 func set_color(c: Color) -> void:
 	_color = c

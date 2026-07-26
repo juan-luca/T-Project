@@ -101,10 +101,10 @@ func _populate() -> void:
 	_spawn_enemy(GRUNT, Vector2(2100, GROUND_Y - 40))
 	_spawn_enemy(DRONE, Vector2(2400, 200))
 
-	_spawn_destructible(Vector2(500, GROUND_Y - 20), Destructible.Material.EXPLOSIVE, true, Color(1, 0.5, 0.2))
-	_spawn_destructible(Vector2(560, GROUND_Y - 20), Destructible.Material.WOOD, false, Color(0.55, 0.38, 0.2))
-	_spawn_destructible(Vector2(1600, 340), Destructible.Material.GLASS, false, Color(0.5, 0.8, 0.9))
-	_spawn_destructible(Vector2(2050, GROUND_Y - 20), Destructible.Material.EXPLOSIVE, true, Color(1, 0.5, 0.2))
+	_spawn_destructible(Vector2(500, GROUND_Y - 20), Destructible.MaterialType.EXPLOSIVE, true, Color(1, 0.5, 0.2))
+	_spawn_destructible(Vector2(560, GROUND_Y - 20), Destructible.MaterialType.WOOD, false, Color(0.55, 0.38, 0.2))
+	_spawn_destructible(Vector2(1600, 340), Destructible.MaterialType.GLASS, false, Color(0.5, 0.8, 0.9))
+	_spawn_destructible(Vector2(2050, GROUND_Y - 20), Destructible.MaterialType.EXPLOSIVE, true, Color(1, 0.5, 0.2))
 
 	_spawn_powerup(HEAL, Vector2(1150, 280))
 	_spawn_powerup(DMG, Vector2(1650, 340))

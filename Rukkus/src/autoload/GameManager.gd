@@ -2,14 +2,14 @@ extends Node
 ## Owns high-level game state, run statistics, co-op config and global time scale
 ## (slow-motion / hit-stop). Deliberately thin: it coordinates, it does not do gameplay.
 
-enum State { BOOT, MENU, PLAYING, PAUSED, CUTSCENE, GAME_OVER, VICTORY }
+enum GameState { BOOT, MENU, PLAYING, PAUSED, CUTSCENE, GAME_OVER, VICTORY }
 
 ## Co-op configuration — single-player works today, these flags make it multiplayer-ready.
 @export var max_players: int = 4
 @export var friendly_fire: bool = false
 @export var shared_lives: bool = true
 
-var state: State = State.BOOT
+var state: GameState = GameState.BOOT
 var score: int = 0
 var run_stats := {"kills": 0, "deaths": 0, "secrets": 0, "time": 0.0}
 
@@ -24,7 +24,7 @@ func _ready() -> void:
 	EventBus.request_hitstop.connect(_on_request_hitstop)
 
 func _process(delta: float) -> void:
-	if state == State.PLAYING:
+	if state == GameState.PLAYING:
 		run_stats.time += delta
 	# Hit-stop: freeze time for a few frames then restore, for punchy impacts.
 	if _hitstop_frames > 0:
@@ -36,7 +36,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause"):
 		toggle_pause()
 
-func change_state(new_state: State) -> void:
+func change_state(new_state: GameState) -> void:
 	if state == new_state:
 		return
 	state = new_state
@@ -45,15 +45,15 @@ func change_state(new_state: State) -> void:
 func start_new_run() -> void:
 	score = 0
 	run_stats = {"kills": 0, "deaths": 0, "secrets": 0, "time": 0.0}
-	change_state(State.PLAYING)
+	change_state(GameState.PLAYING)
 
 func toggle_pause() -> void:
-	if state == State.PLAYING:
-		change_state(State.PAUSED)
+	if state == GameState.PLAYING:
+		change_state(GameState.PAUSED)
 		get_tree().paused = true
 		EventBus.game_paused.emit(true)
-	elif state == State.PAUSED:
-		change_state(State.PLAYING)
+	elif state == GameState.PAUSED:
+		change_state(GameState.PLAYING)
 		get_tree().paused = false
 		EventBus.game_paused.emit(false)
 

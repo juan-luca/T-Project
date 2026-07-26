@@ -5,9 +5,9 @@ class_name Destructible
 ## explosive, triggers a chain-reaction blast. Level-critical geometry never uses this —
 ## it is intentionally non-solid so the floor can't be deleted.
 
-enum Material { WOOD, METAL, GLASS, FOLIAGE, EXPLOSIVE, STONE }
+enum MaterialType { WOOD, METAL, GLASS, FOLIAGE, EXPLOSIVE, STONE }
 
-@export var material_type: Material = Material.WOOD
+@export var material_type: MaterialType = MaterialType.WOOD
 @export var max_hp: float = 30.0
 @export var size: Vector2 = Vector2(40, 40)
 @export var color: Color = Color(0.55, 0.38, 0.2)

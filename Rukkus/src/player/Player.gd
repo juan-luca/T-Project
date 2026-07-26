@@ -102,7 +102,7 @@ func _build_states() -> void:
 	state_machine.state_changed.connect(func(n): EventBus.player_state_changed.emit(slot, n))
 
 func _physics_process(delta: float) -> void:
-	if GameManager.state == GameManager.State.PAUSED:
+	if GameManager.state == GameManager.GameState.PAUSED:
 		return
 	intent = InputManager.get_intent(slot)
 	_tick_timers(delta)

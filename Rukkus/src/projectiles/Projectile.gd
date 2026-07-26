@@ -64,8 +64,8 @@ func _physics_process(delta: float) -> void:
 		ProjectileData.Motion.BOOMERANG:
 			if not _returning and global_position.distance_to(_origin) > data.speed * 0.4:
 				_returning = true
-			if _returning and _source and is_instance_valid(_source):
-				var back := (_source.global_position - global_position).normalized() * data.speed
+			if _returning and _source is Node2D and is_instance_valid(_source):
+				var back: Vector2 = ((_source as Node2D).global_position - global_position).normalized() * data.speed
 				_velocity = _velocity.lerp(back, 6.0 * delta)
 		_:
 			pass
